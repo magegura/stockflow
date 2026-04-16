@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import Numeric, cast, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -171,7 +171,7 @@ def dashboard(db: Session = Depends(get_db), user: dict = Depends(get_current_us
             Product.name,
             Product.sku,
             func.sum(SaleItem.quantity).label("quantity_sold"),
-            func.round(func.sum(SaleItem.quantity * SaleItem.unit_price), 2).label("revenue"),
+            cast(func.sum(SaleItem.quantity * SaleItem.unit_price), Numeric(12, 2)).label("revenue"),
         )
         .join(SaleItem, SaleItem.product_id == Product.id)
         .group_by(Product.id, Product.name, Product.sku)
@@ -182,7 +182,7 @@ def dashboard(db: Session = Depends(get_db), user: dict = Depends(get_current_us
     revenue_by_day_subquery = (
         select(
             func.date(Sale.created_at).label("day"),
-            func.round(func.sum(Sale.total_amount), 2).label("revenue"),
+            cast(func.sum(Sale.total_amount), Numeric(12, 2)).label("revenue"),
         )
         .group_by(func.date(Sale.created_at))
         .order_by(text("day DESC"))
