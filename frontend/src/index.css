@@ -347,7 +347,8 @@ h4 {
 .filter-pills,
 .button-row.wrap,
 .control-row.wrap,
-.card-actions {
+.card-actions,
+.language-switch-row {
   display: flex;
   flex-wrap: wrap;
 }
