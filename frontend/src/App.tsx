@@ -15,6 +15,9 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 type Tab = 'dashboard' | 'products' | 'sales' | 'movements' | 'logs' | 'profile' | 'settings' | 'docs'
+type SettingsSection = 'appearance' | 'language' | 'account' | 'team' | 'logs' | 'help'
+type ThemeMode = 'light' | 'dark'
+type AccentScheme = 'blue' | 'emerald' | 'violet' | 'sunset'
 type StockFilter = 'all' | 'low' | 'out'
 type LogFilter = 'all' | 'info' | 'warning' | 'error'
 type StaffStatus = 'active' | 'on_leave' | 'inactive'
@@ -29,11 +32,17 @@ function navItems(t: I18n) {
     { id: 'products' as const, label: t.nav.products.label, icon: '📦', description: t.nav.products.description },
     { id: 'sales' as const, label: t.nav.sales.label, icon: '🧾', description: t.nav.sales.description },
     { id: 'movements' as const, label: t.nav.movements.label, icon: '🔁', description: t.nav.movements.description },
-    { id: 'logs' as const, label: t.nav.logs.label, icon: '🪵', description: t.nav.logs.description },
-    { id: 'profile' as const, label: t.nav.profile.label, icon: '👤', description: t.nav.profile.description },
-    { id: 'settings' as const, label: t.nav.settings.label, icon: '🌐', description: t.nav.settings.description },
-    { id: 'docs' as const, label: t.nav.docs.label, icon: '📚', description: t.nav.docs.description },
+    { id: 'settings' as const, label: t.nav.settings.label, icon: '⚙️', description: t.nav.settings.description },
   ]
+}
+
+function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('') || 'SF'
 }
 
 function buildNetworkError(url: string, path: string, error: unknown, t: I18n): Error {
@@ -214,6 +223,9 @@ function App() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [selectedMovement, setSelectedMovement] = useState<Movement | null>(null)
   const [editingStaffId, setEditingStaffId] = useState<number | null>(null)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
+  const [themeMode, setThemeMode] = useState<ThemeMode>((localStorage.getItem('stockflow_theme') as ThemeMode) || 'light')
+  const [accentScheme, setAccentScheme] = useState<AccentScheme>((localStorage.getItem('stockflow_accent') as AccentScheme) || 'blue')
 
   const [loginForm, setLoginForm] = useState({ email: 'admin@stockflow.app', password: 'Admin123!' })
   const [productForm, setProductForm] = useState({ name: '', sku: '', price: '0', stock: '0', min_stock: '0' })
@@ -237,6 +249,42 @@ function App() {
   const items = useMemo(() => navItems(t), [t])
   const currentTabMeta = items.find((item) => item.id === tab) ?? items[0]
   const docsSections = t.docs.sections
+  const appearanceCopy = language === 'es'
+    ? { title: 'Apariencia', description: 'Elegí el modo visual y el color principal del espacio.', light: 'Claro', dark: 'Oscuro', accentTitle: 'Color principal', accentDescription: 'Aplicado a botones, focos y elementos destacados.', updatedTheme: 'Tema actualizado', updatedAccent: 'Color actualizado' }
+    : language === 'ru'
+      ? { title: 'Внешний вид', description: 'Выберите тему интерфейса и основной цвет рабочего пространства.', light: 'Светлая', dark: 'Тёмная', accentTitle: 'Основной цвет', accentDescription: 'Используется для кнопок, акцентов и элементов управления.', updatedTheme: 'Тема обновлена', updatedAccent: 'Цветовая схема обновлена' }
+      : { title: 'Appearance', description: 'Choose the workspace mode and primary accent color.', light: 'Light', dark: 'Dark', accentTitle: 'Accent color', accentDescription: 'Used for buttons, focus states and highlighted UI elements.', updatedTheme: 'Theme updated', updatedAccent: 'Accent color updated' }
+  const accentOptions = [
+    { value: 'blue' as const, label: language === 'es' ? 'Azul' : language === 'ru' ? 'Синий' : 'Blue' },
+    { value: 'emerald' as const, label: language === 'es' ? 'Esmeralda' : language === 'ru' ? 'Изумрудный' : 'Emerald' },
+    { value: 'violet' as const, label: language === 'es' ? 'Violeta' : language === 'ru' ? 'Фиолетовый' : 'Violet' },
+    { value: 'sunset' as const, label: language === 'es' ? 'Atardecer' : language === 'ru' ? 'Закат' : 'Sunset' },
+  ]
+  const settingsSections = [
+    { id: 'appearance' as const, label: appearanceCopy.title },
+    { id: 'language' as const, label: t.common.language },
+    { id: 'account' as const, label: t.nav.profile.label },
+    ...(user?.role === 'admin' ? [{ id: 'team' as const, label: language === 'es' ? 'Personal' : language === 'ru' ? 'Команда' : 'Team' }] : []),
+    { id: 'logs' as const, label: t.nav.logs.label },
+    { id: 'help' as const, label: language === 'es' ? 'Ayuda' : language === 'ru' ? 'Справка' : 'Help' },
+  ]
+  const helpSections = language === 'es'
+    ? [
+        { title: 'Primeros pasos', items: ['Usá Dashboard para ver el estado general del negocio.', 'En Productos podés revisar precios, stock y puntos de reposición.', 'Ventas y Movimientos muestran el historial reciente con detalle adicional.'] },
+        { title: 'Cuenta y equipo', items: ['Actualizá tus datos desde Perfil dentro de Configuración.', 'Si sos admin, también podés gestionar el personal desde la misma sección.', 'Los cambios se guardan y se reflejan en toda la aplicación.'] },
+        { title: 'Actividad', items: ['Los logs te ayudan a revisar acciones recientes.', 'Podés cambiar idioma, tema y color principal sin salir de la app.', 'La interfaz se adapta a escritorio, tablet y móvil.'] },
+      ]
+    : language === 'ru'
+      ? [
+          { title: 'Быстрый старт', items: ['На Dashboard видна общая картина по бизнесу.', 'В разделе Products можно контролировать цены, остатки и минимальный запас.', 'Разделы Sales и Movements показывают недавнюю активность и детали операций.'] },
+          { title: 'Профиль и команда', items: ['Обновляйте свои данные в разделе Profile внутри Settings.', 'Если вы администратор, там же можно управлять сотрудниками.', 'Все изменения сохраняются и сразу отражаются в приложении.'] },
+          { title: 'Активность', items: ['Logs помогают быстро проверить последние действия.', 'Язык, тема и основной цвет меняются прямо в приложении.', 'Интерфейс адаптирован под компьютер, планшет и телефон.'] },
+        ]
+      : [
+          { title: 'Getting started', items: ['Use Dashboard to review the overall business snapshot.', 'Products lets you monitor prices, stock levels and reorder points.', 'Sales and Movements show recent activity with additional details.'] },
+          { title: 'Account and team', items: ['Update your information from Profile inside Settings.', 'If you are an admin, you can manage staff from the same area.', 'Changes are saved and reflected across the application.'] },
+          { title: 'Activity', items: ['Logs help you review recent actions.', 'You can change language, theme and accent without leaving the app.', 'The interface adapts to desktop, tablet and phone screens.'] },
+        ]
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -343,6 +391,16 @@ function App() {
   }, [language])
 
   useEffect(() => {
+    localStorage.setItem('stockflow_theme', themeMode)
+    document.documentElement.dataset.theme = themeMode
+  }, [themeMode])
+
+  useEffect(() => {
+    localStorage.setItem('stockflow_accent', accentScheme)
+    document.documentElement.dataset.accent = accentScheme
+  }, [accentScheme])
+
+  useEffect(() => {
     const onResize = () => {
       if (window.innerWidth > 960) setMobileNavOpen(false)
     }
@@ -386,6 +444,16 @@ function App() {
   const handleLanguageChange = (nextLanguage: Language) => {
     setLanguage(nextLanguage)
     setMessage(translations[nextLanguage].common.languageUpdated)
+  }
+
+  const handleThemeChange = (nextTheme: ThemeMode) => {
+    setThemeMode(nextTheme)
+    setMessage(appearanceCopy.updatedTheme)
+  }
+
+  const handleAccentChange = (nextAccent: AccentScheme) => {
+    setAccentScheme(nextAccent)
+    setMessage(appearanceCopy.updatedAccent)
   }
 
   const handleLogin = async (event: FormEvent) => {
@@ -649,16 +717,9 @@ function App() {
               ))}
             </div>
             <div>
-              <span className="eyebrow">{t.publicationReady}</span>
-              <h1>{t.appName}</h1>
+              <span className="eyebrow">{t.appName}</span>
+              <h1>{t.workspaceName}</h1>
               <p className="muted">{t.authSubtitle}</p>
-            </div>
-            <div className="feature-list inline">
-              <span className="feature-pill">FastAPI</span>
-              <span className="feature-pill">React + TypeScript</span>
-              <span className="feature-pill">{t.nav.profile.label}</span>
-              <span className="feature-pill">{t.nav.logs.label}</span>
-              <span className="feature-pill">{t.misc.responsive}</span>
             </div>
             <div className="callout">
               <strong>{t.login.demoAccounts}</strong>
@@ -704,46 +765,44 @@ function App() {
         </div>
 
         <div className="user-box">
-          <strong>{user.name}</strong>
-          <span>{user.email}</span>
-          <span className={`role-pill role-${user.role}`}>{translateRole(user.role, t)}</span>
+          <div className="avatar-circle">{getInitials(user.name)}</div>
+          <div className="user-copy">
+            <strong>{user.name}</strong>
+            <span>{user.email}</span>
+            <span className={`role-pill role-${user.role}`}>{translateRole(user.role, t)}</span>
+          </div>
         </div>
 
         <nav className="nav-list">
           {items.map((item) => (
             <button key={item.id} className={item.id === tab ? 'nav-button active' : 'nav-button'} onClick={() => selectTab(item.id)} type="button" title={item.label}>
               <span className="nav-icon">{item.icon}</span>
-              <span className="nav-copy">
-                <strong>{item.label}</strong>
-                <small>{item.description}</small>
-              </span>
+              <span className="nav-label">{item.label}</span>
             </button>
           ))}
         </nav>
 
-        <div className="sidebar-note">
-          <strong>{t.readyForReview}</strong>
-          <p className="muted small">{t.readyForReviewNote}</p>
-        </div>
-
         <div className="sidebar-actions">
-          <button className="secondary" type="button" onClick={() => void handleRefresh()}>{t.common.refreshData}</button>
-          {user.role === 'admin' ? <button className="secondary" type="button" onClick={() => void handlePopulateDemoData()}>{t.common.syncDemoData}</button> : null}
-          <button className="ghost" type="button" onClick={handleLogout}>{t.common.logout}</button>
+          <button className="secondary compact" type="button" onClick={() => void handleRefresh()}>{t.common.refresh}</button>
+          {user.role === 'admin' ? <button className="secondary compact" type="button" onClick={() => void handlePopulateDemoData()}>{t.common.syncDemoData}</button> : null}
+          <button className="ghost compact" type="button" onClick={handleLogout}>{t.common.logout}</button>
         </div>
       </aside>
 
       <main className="content">
-        <header className="topbar panel">
+        <header className="topbar panel topbar-modern">
           <div className="topbar-main">
             <button className="icon-button mobile-only" type="button" onClick={() => setMobileNavOpen(true)}>☰</button>
-            <div>
-              <span className="eyebrow">{t.operationalWorkspace}</span>
+            <div className="topbar-copy">
+              <span className="eyebrow">{t.appName}</span>
               <h1>{currentTabMeta.label}</h1>
-              <p className="muted">{currentTabMeta.description}</p>
+              <p className="muted small topbar-subtitle">{currentTabMeta.description}</p>
             </div>
           </div>
-          <button className="ghost compact" type="button" onClick={() => void handleRefresh()}>{t.common.refresh}</button>
+          <div className="topbar-actions">
+            <span className={`role-pill role-${user.role}`}>{translateRole(user.role, t)}</span>
+            <button className="ghost compact" type="button" onClick={() => void handleRefresh()}>{t.common.refresh}</button>
+          </div>
         </header>
 
         {isLoading ? <div className="alert">{t.common.loadingData}</div> : null}
@@ -872,11 +931,14 @@ function App() {
                 {filteredProducts.map((product) => {
                   const status = getStatus(product, t)
                   return (
-                    <article className="product-card elevated" key={product.id}>
+                    <article className="product-card elevated modern-product-card" key={product.id}>
                       <div className="product-card-head">
-                        <div className="min-w-0">
-                          <h4>{product.name}</h4>
-                          <div className="muted small">{product.sku}</div>
+                        <div className="product-identity">
+                          <div className="product-avatar">{product.name.slice(0, 2).toUpperCase()}</div>
+                          <div className="min-w-0">
+                            <h4>{product.name}</h4>
+                            <div className="muted small">{product.sku}</div>
+                          </div>
                         </div>
                         <span className={status.className}>{status.label}</span>
                       </div>
@@ -887,7 +949,7 @@ function App() {
                         <div className="product-metric span-two"><span className="muted small">{t.common.updated}</span><strong>{formatDate(product.updated_at, locale)}</strong></div>
                       </div>
                       {user.role === 'admin' ? (
-                        <div className="card-actions">
+                        <div className="card-actions card-actions-modern">
                           <button className="secondary compact" type="button" onClick={() => startEditProduct(product)}>{t.products.edit}</button>
                           <button className="ghost compact danger" type="button" onClick={() => setProductPendingDelete(product)}>{t.products.delete}</button>
                         </div>
@@ -952,22 +1014,23 @@ function App() {
                 <h3>{t.sales.recentSales}</h3>
                 <span className="muted small">{t.sales.structuredList}</span>
               </div>
-              <div className="list-table">
-                <div className="list-table-head">
-                  <span>{t.sales.sale}</span>
-                  <span>{t.common.createdBy}</span>
-                  <span>{t.common.total}</span>
-                  <span>{t.common.date}</span>
-                  <span>{t.common.details}</span>
-                </div>
+              <div className="record-list">
                 {sales.map((sale) => (
-                  <div className="list-table-row" key={sale.id}>
-                    <span className="list-main">{interpolate(t.sales.saleDetailsTitle, { id: sale.id })}</span>
-                    <span>{sale.created_by_name}</span>
-                    <span>{currency(sale.total_amount, locale)}</span>
-                    <span>{formatDate(sale.created_at, locale)}</span>
-                    <span><button className="secondary compact" type="button" onClick={() => setSelectedSale(sale)}>{t.common.moreInfo}</button></span>
-                  </div>
+                  <article className="record-row" key={sale.id}>
+                    <div className="record-primary">
+                      <div className="record-title-group">
+                        <strong>{interpolate(t.sales.saleDetailsTitle, { id: sale.id })}</strong>
+                        <p className="muted small">{sale.created_by_name} · {sale.items.length} {t.common.items.toLowerCase()}</p>
+                      </div>
+                      <div className="record-meta-pills">
+                        <span className="tag">{currency(sale.total_amount, locale)}</span>
+                        <span className="tag">{formatDate(sale.created_at, locale)}</span>
+                      </div>
+                    </div>
+                    <div className="record-secondary">
+                      <button className="secondary compact" type="button" onClick={() => setSelectedSale(sale)}>{t.common.moreInfo}</button>
+                    </div>
+                  </article>
                 ))}
               </div>
             </section>
@@ -1016,24 +1079,23 @@ function App() {
                 <h3>{t.movements.recentMovements}</h3>
                 <span className="muted small">{t.movements.readableTable}</span>
               </div>
-              <div className="list-table">
-                <div className="list-table-head">
-                  <span>{t.common.type}</span>
-                  <span>{t.common.product}</span>
-                  <span>{t.common.quantity}</span>
-                  <span>{t.common.by}</span>
-                  <span>{t.common.date}</span>
-                  <span>{t.common.details}</span>
-                </div>
+              <div className="record-list">
                 {movements.map((movement) => (
-                  <div className="list-table-row" key={movement.id}>
-                    <span><span className={`tag tag-${movement.movement_type}`}>{translateMovementType(movement.movement_type, t)}</span></span>
-                    <span className="list-main">{movement.product_name} <small className="muted">{movement.sku}</small></span>
-                    <span>{movement.quantity}</span>
-                    <span>{movement.created_by_name}</span>
-                    <span>{formatDate(movement.created_at, locale)}</span>
-                    <span><button className="secondary compact" type="button" onClick={() => setSelectedMovement(movement)}>{t.common.moreInfo}</button></span>
-                  </div>
+                  <article className="record-row" key={movement.id}>
+                    <div className="record-primary">
+                      <div className="record-title-group">
+                        <strong>{translateMovementType(movement.movement_type, t)}</strong>
+                        <p className="muted small">{movement.product_name} · {movement.sku} · {movement.created_by_name}</p>
+                      </div>
+                      <div className="record-meta-pills">
+                        <span className={`tag tag-${movement.movement_type}`}>{t.common.quantity}: {movement.quantity}</span>
+                        <span className="tag">{formatDate(movement.created_at, locale)}</span>
+                      </div>
+                    </div>
+                    <div className="record-secondary">
+                      <button className="secondary compact" type="button" onClick={() => setSelectedMovement(movement)}>{t.common.moreInfo}</button>
+                    </div>
+                  </article>
                 ))}
               </div>
             </section>
@@ -1240,59 +1302,335 @@ function App() {
 
         {tab === 'settings' ? (
           <section className="stack-xl">
-            <section className="panel compact-hero">
-              <div>
-                <span className="eyebrow">{t.nav.settings.label}</span>
-                <h3>{t.settings.title}</h3>
-                <p className="muted small">{t.settings.subtitle}</p>
+            <section className="panel settings-shell">
+              <div className="settings-hero">
+                <div className="avatar-circle large">{getInitials(user.name)}</div>
+                <div>
+                  <span className="eyebrow">{t.nav.settings.label}</span>
+                  <h3>{t.settings.title}</h3>
+                  <p className="muted small">{t.settings.subtitle}</p>
+                </div>
+              </div>
+              <div className="settings-nav">
+                {settingsSections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={settingsSection === section.id ? 'pill active' : 'pill'}
+                    onClick={() => setSettingsSection(section.id)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
               </div>
             </section>
 
-            <div className="split-grid profile-grid">
-              <section className="panel">
-                <div className="section-head">
-                  <div>
-                    <h3>{t.settings.languageSectionTitle}</h3>
-                    <p className="muted small">{t.settings.languageSectionDescription}</p>
+            {settingsSection === 'appearance' ? (
+              <div className="split-grid profile-grid">
+                <section className="panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>{appearanceCopy.title}</h3>
+                      <p className="muted small">{appearanceCopy.description}</p>
+                    </div>
                   </div>
-                </div>
+                  <div className="stack">
+                    <div>
+                      <span className="muted small section-label">{appearanceCopy.title}</span>
+                      <div className="choice-grid">
+                        <button type="button" className={themeMode === 'light' ? 'choice-card active' : 'choice-card'} onClick={() => handleThemeChange('light')}>
+                          <strong>{appearanceCopy.light}</strong>
+                        </button>
+                        <button type="button" className={themeMode === 'dark' ? 'choice-card active' : 'choice-card'} onClick={() => handleThemeChange('dark')}>
+                          <strong>{appearanceCopy.dark}</strong>
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="stack">
-                  <div className="language-switch-row wrap-row">
-                    {languageOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        className={language === option.value ? 'pill active' : 'pill'}
-                        type="button"
-                        onClick={() => handleLanguageChange(option.value)}
-                      >
-                        {option.nativeLabel}
-                      </button>
+                    <div>
+                      <span className="muted small section-label">{appearanceCopy.accentTitle}</span>
+                      <p className="muted small">{appearanceCopy.accentDescription}</p>
+                      <div className="choice-grid accents">
+                        {accentOptions.map((option) => (
+                          <button key={option.value} type="button" className={accentScheme === option.value ? 'choice-card active accent-choice' : 'choice-card accent-choice'} onClick={() => handleAccentChange(option.value)}>
+                            <span className={`accent-dot accent-${option.value}`} />
+                            <strong>{option.label}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="panel">
+                  <div className="section-head">
+                    <h3>{t.profile.accountSummary}</h3>
+                  </div>
+                  <div className="profile-summary">
+                    <div className="summary-row"><span>{t.common.language}</span><strong>{languageOptions.find((option) => option.value === language)?.nativeLabel}</strong></div>
+                    <div className="summary-row"><span>{appearanceCopy.title}</span><strong>{themeMode === 'dark' ? appearanceCopy.dark : appearanceCopy.light}</strong></div>
+                    <div className="summary-row"><span>{appearanceCopy.accentTitle}</span><strong>{accentOptions.find((option) => option.value === accentScheme)?.label}</strong></div>
+                    <div className="summary-row"><span>{t.common.role}</span><strong>{translateRole(user.role, t)}</strong></div>
+                    <div className="summary-row"><span>{t.common.department}</span><strong>{user.department}</strong></div>
+                    <div className="summary-row"><span>{t.common.updated}</span><strong>{formatDate(user.updated_at, locale)}</strong></div>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+
+            {settingsSection === 'language' ? (
+              <div className="split-grid profile-grid">
+                <section className="panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>{t.settings.languageSectionTitle}</h3>
+                      <p className="muted small">{t.settings.languageSectionDescription}</p>
+                    </div>
+                  </div>
+
+                  <div className="stack">
+                    <div className="language-switch-row wrap-row">
+                      {languageOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          className={language === option.value ? 'pill active' : 'pill'}
+                          type="button"
+                          onClick={() => handleLanguageChange(option.value)}
+                        >
+                          {option.nativeLabel}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="callout small-callout">
+                      <strong>{t.settings.currentLanguage}</strong>
+                      <p>{languageOptions.find((option) => option.value === language)?.nativeLabel}</p>
+                      <p className="muted small">{t.settings.persistenceNote}</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="panel">
+                  <div className="section-head">
+                    <h3>{t.settings.previewTitle}</h3>
+                  </div>
+                  <div className="profile-summary">
+                    <div className="summary-row"><span>{t.nav.dashboard.label}</span><strong>{t.dashboard.metrics.products.label}</strong></div>
+                    <div className="summary-row"><span>{t.nav.products.label}</span><strong>{t.products.createProductButton}</strong></div>
+                    <div className="summary-row"><span>{t.nav.sales.label}</span><strong>{t.sales.createSaleButton}</strong></div>
+                    <div className="summary-row"><span>{t.nav.movements.label}</span><strong>{t.movements.saveMovement}</strong></div>
+                  </div>
+                  <p className="muted small">{t.settings.previewDescription}</p>
+                </section>
+              </div>
+            ) : null}
+
+            {settingsSection === 'account' ? (
+              <div className="split-grid profile-grid">
+                <section className="panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>{t.profile.myProfile}</h3>
+                      <p className="muted small">{t.profile.myProfileDescription}</p>
+                    </div>
+                    <span className={`status-badge status-${user.status}`}>{translateStatus(user.status, t)}</span>
+                  </div>
+                  <form className="form-grid" onSubmit={handleSaveProfile}>
+                    <label>
+                      {t.profile.fullName}
+                      <input value={profileForm.name} onChange={(event) => setProfileForm((current) => ({ ...current, name: event.target.value }))} required />
+                    </label>
+                    <label>
+                      {t.common.email}
+                      <input type="email" value={profileForm.email} onChange={(event) => setProfileForm((current) => ({ ...current, email: event.target.value }))} required />
+                    </label>
+                    <label>
+                      {t.common.phone}
+                      <input value={profileForm.phone} onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value }))} />
+                    </label>
+                    <label>
+                      {t.common.department}
+                      <input value={profileForm.department} onChange={(event) => setProfileForm((current) => ({ ...current, department: event.target.value }))} required />
+                    </label>
+                    <label className="span-two">
+                      {t.common.title}
+                      <input value={profileForm.title} onChange={(event) => setProfileForm((current) => ({ ...current, title: event.target.value }))} required />
+                    </label>
+                    <label className="span-full">
+                      {t.common.bio}
+                      <textarea rows={4} value={profileForm.bio} onChange={(event) => setProfileForm((current) => ({ ...current, bio: event.target.value }))} />
+                    </label>
+                    <div className="button-row end span-full"><button type="submit">{t.profile.saveProfile}</button></div>
+                  </form>
+                </section>
+
+                <section className="panel">
+                  <div className="section-head">
+                    <h3>{t.profile.accountSummary}</h3>
+                  </div>
+                  <div className="profile-summary">
+                    <div className="summary-row"><span>{t.common.role}</span><strong>{translateRole(user.role, t)}</strong></div>
+                    <div className="summary-row"><span>{t.common.title}</span><strong>{user.title}</strong></div>
+                    <div className="summary-row"><span>{t.common.department}</span><strong>{user.department}</strong></div>
+                    <div className="summary-row"><span>{t.common.hierarchy}</span><strong>{translateHierarchy(user.hierarchy_level, t)}</strong></div>
+                    <div className="summary-row"><span>{t.common.manager}</span><strong>{user.manager_name || t.common.noManager}</strong></div>
+                    <div className="summary-row"><span>{t.common.updated}</span><strong>{formatDate(user.updated_at, locale)}</strong></div>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+
+            {settingsSection === 'team' && user.role === 'admin' ? (
+              <>
+                <section className="panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>{editingStaffId ? t.profile.editStaffMember : t.profile.addStaffMember}</h3>
+                      <p className="muted small">{t.profile.staffDescription}</p>
+                    </div>
+                    {editingStaffId ? <button className="ghost compact" type="button" onClick={resetStaffForm}>{t.common.cancelEdit}</button> : null}
+                  </div>
+                  <form className="form-grid" onSubmit={handleSaveStaff}>
+                    <label>
+                      {t.profile.fullName}
+                      <input value={staffForm.name} onChange={(event) => setStaffForm((current) => ({ ...current, name: event.target.value }))} required />
+                    </label>
+                    <label>
+                      {t.common.email}
+                      <input type="email" value={staffForm.email} onChange={(event) => setStaffForm((current) => ({ ...current, email: event.target.value }))} required />
+                    </label>
+                    {!editingStaffId ? (
+                      <label>
+                        {t.profile.temporaryPassword}
+                        <input type="password" value={staffForm.password} onChange={(event) => setStaffForm((current) => ({ ...current, password: event.target.value }))} required />
+                      </label>
+                    ) : null}
+                    <label>
+                      {t.common.role}
+                      <select value={staffForm.role} onChange={(event) => setStaffForm((current) => ({ ...current, role: event.target.value as User['role'] }))}>
+                        <option value="employee">{t.common.employee}</option>
+                        <option value="admin">{t.common.admin}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {t.common.status}
+                      <select value={staffForm.status} onChange={(event) => setStaffForm((current) => ({ ...current, status: event.target.value as StaffStatus }))}>
+                        <option value="active">{t.common.active}</option>
+                        <option value="on_leave">{t.common.onLeave}</option>
+                        <option value="inactive">{t.common.inactive}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {t.common.hierarchy}
+                      <select value={staffForm.hierarchy_level} onChange={(event) => setStaffForm((current) => ({ ...current, hierarchy_level: event.target.value as StaffLevel }))}>
+                        <option value="staff">{t.common.staff}</option>
+                        <option value="lead">{t.common.lead}</option>
+                        <option value="management">{t.common.management}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {t.common.phone}
+                      <input value={staffForm.phone} onChange={(event) => setStaffForm((current) => ({ ...current, phone: event.target.value }))} />
+                    </label>
+                    <label>
+                      {t.common.department}
+                      <input value={staffForm.department} onChange={(event) => setStaffForm((current) => ({ ...current, department: event.target.value }))} required />
+                    </label>
+                    <label>
+                      {t.common.title}
+                      <input value={staffForm.title} onChange={(event) => setStaffForm((current) => ({ ...current, title: event.target.value }))} required />
+                    </label>
+                    <label>
+                      {t.common.manager}
+                      <input value={staffForm.manager_name} onChange={(event) => setStaffForm((current) => ({ ...current, manager_name: event.target.value }))} />
+                    </label>
+                    <label className="span-full">
+                      {t.common.bio}
+                      <textarea rows={3} value={staffForm.bio} onChange={(event) => setStaffForm((current) => ({ ...current, bio: event.target.value }))} />
+                    </label>
+                    <div className="button-row end span-full"><button type="submit">{editingStaffId ? t.profile.saveStaffMember : t.profile.createStaffMember}</button></div>
+                  </form>
+                </section>
+
+                <section className="panel">
+                  <div className="section-head wrap-row">
+                    <div>
+                      <h3>{t.profile.personnel}</h3>
+                      <p className="muted small">{interpolate(t.profile.personnelSummary, { active: activeStaff, total: staff.length })}</p>
+                    </div>
+                  </div>
+                  <div className="staff-grid">
+                    {staff.map((person) => (
+                      <article className="staff-card" key={person.id}>
+                        <div className="staff-card-top">
+                          <div className="min-w-0">
+                            <h4>{person.name}</h4>
+                            <p className="muted small">{person.email}</p>
+                          </div>
+                          <span className={`status-badge status-${person.status}`}>{translateStatus(person.status, t)}</span>
+                        </div>
+                        <div className="staff-meta">
+                          <div><span className="muted small">{t.common.role}</span><strong>{translateRole(person.role, t)}</strong></div>
+                          <div><span className="muted small">{t.common.title}</span><strong>{person.title}</strong></div>
+                          <div><span className="muted small">{t.common.department}</span><strong>{person.department}</strong></div>
+                          <div><span className="muted small">{t.common.hierarchy}</span><strong>{translateHierarchy(person.hierarchy_level, t)}</strong></div>
+                        </div>
+                        <p className="muted small">{interpolate(t.profile.managerLabel, { manager: person.manager_name || t.common.noManager })}</p>
+                        <div className="card-actions"><button className="secondary compact" type="button" onClick={() => startEditStaff(person)}>{t.products.edit}</button></div>
+                      </article>
                     ))}
                   </div>
+                </section>
+              </>
+            ) : null}
 
-                  <div className="callout small-callout">
-                    <strong>{t.settings.currentLanguage}</strong>
-                    <p>{languageOptions.find((option) => option.value === language)?.nativeLabel}</p>
-                    <p className="muted small">{t.settings.persistenceNote}</p>
+            {settingsSection === 'logs' ? (
+              <section className="panel">
+                <div className="section-head wrap-row">
+                  <div>
+                    <h3>{t.logs.title}</h3>
+                    <p className="muted small">{t.logs.description}</p>
+                  </div>
+                  <div className="control-row wrap">
+                    <input className="search" placeholder={t.logs.searchPlaceholder} value={logSearch} onChange={(event) => setLogSearch(event.target.value)} />
+                    <div className="filter-pills">
+                      {(['all', 'info', 'warning', 'error'] as LogFilter[]).map((item) => (
+                        <button key={item} className={logFilter === item ? 'pill active' : 'pill'} type="button" onClick={() => setLogFilter(item)}>{item === 'all' ? t.common.all : translateLogLevel(item, t)}</button>
+                      ))}
+                    </div>
                   </div>
                 </div>
+                <div className="log-grid">
+                  {filteredLogs.map((entry) => (
+                    <article className="log-card" key={entry.id}>
+                      <div className="log-head">
+                        <div className="log-badges">
+                          <span className={`tag tag-${entry.level}`}>{translateLogLevel(entry.level, t)}</span>
+                          <span className="tag">{humanizeAction(entry.action, t)}</span>
+                        </div>
+                        <span className="muted small">{formatDate(entry.created_at, locale)}</span>
+                      </div>
+                      <strong>{translateBackendMessage(entry.message, t)}</strong>
+                      <p className="muted small">{entry.created_by_name} · {entry.entity_type || t.logs.system}{entry.entity_id ? ` #${entry.entity_id}` : ''}</p>
+                      <p>{detailsToText(entry.details, t)}</p>
+                    </article>
+                  ))}
+                </div>
               </section>
+            ) : null}
 
-              <section className="panel">
-                <div className="section-head">
-                  <h3>{t.settings.previewTitle}</h3>
-                </div>
-                <div className="profile-summary">
-                  <div className="summary-row"><span>{t.common.language}</span><strong>{languageOptions.find((option) => option.value === language)?.label}</strong></div>
-                  <div className="summary-row"><span>{t.nav.dashboard.label}</span><strong>{t.dashboard.metrics.products.label}</strong></div>
-                  <div className="summary-row"><span>{t.nav.products.label}</span><strong>{t.products.createProductButton}</strong></div>
-                  <div className="summary-row"><span>{t.nav.sales.label}</span><strong>{t.sales.createSaleButton}</strong></div>
-                  <div className="summary-row"><span>{t.nav.movements.label}</span><strong>{t.movements.saveMovement}</strong></div>
-                </div>
-                <p className="muted small">{t.settings.previewDescription}</p>
-              </section>
-            </div>
+            {settingsSection === 'help' ? (
+              <div className="docs-grid">
+                {helpSections.map((section) => (
+                  <article className="panel" key={section.title}>
+                    <h3>{section.title}</h3>
+                    <ul className="doc-list">
+                      {section.items.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 

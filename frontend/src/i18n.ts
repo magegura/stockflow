@@ -112,13 +112,13 @@ export const translations = {
       current: 'Current',
     },
     nav: {
-      dashboard: { label: 'Dashboard', description: 'Compact operational overview' },
-      products: { label: 'Products', description: 'Responsive product catalog cards' },
-      sales: { label: 'Sales', description: 'Readable sales list with details modal' },
-      movements: { label: 'Movements', description: 'Stock adjustments and full history' },
+      dashboard: { label: 'Dashboard', description: 'Your daily overview and priorities' },
+      products: { label: 'Products', description: 'Catalog, pricing and stock health' },
+      sales: { label: 'Sales', description: 'Orders, totals and sale details' },
+      movements: { label: 'Movements', description: 'Inventory changes and history' },
       logs: { label: 'Logs', description: 'Audit trail and system actions' },
       profile: { label: 'Profile', description: 'Personal info and staff management' },
-      settings: { label: 'Settings', description: 'Language and workspace preferences' },
+      settings: { label: 'Settings', description: 'Appearance, language and account preferences' },
       docs: { label: 'Docs', description: 'Technical notes and release summary' },
     },
     login: {
@@ -131,8 +131,8 @@ export const translations = {
     },
     dashboard: {
       liveSummary: 'Live summary',
-      compactTitle: 'Compact dashboard for faster scanning',
-      compactDescription: 'Smaller cards, denser layout and cleaner hierarchy for desktop and mobile.',
+      compactTitle: 'Clear dashboard for faster scanning',
+      compactDescription: 'A cleaner hierarchy, balanced spacing and mobile-friendly density for every screen.',
       staff: 'staff',
       products: 'products',
       sales: 'sales',
@@ -157,7 +157,7 @@ export const translations = {
       editModalSubtitle: 'Update the product fields below and save your changes.',
       deleteTitle: 'Delete product',
       deleteSubtitle: 'This will remove {{name}} from the catalog.',
-      productActionsNote: 'Product actions persist to the database and refresh analytics.',
+      productActionsNote: 'Keep prices, stock targets and catalog details up to date from one place.',
       stockChangesHandled: 'Stock changes are handled in Movements',
       stockChangesDescription: 'This keeps inventory updates auditable and consistent.',
       initialStock: 'Initial stock',
@@ -203,7 +203,7 @@ export const translations = {
     },
     logs: {
       title: 'Audit logs',
-      description: 'Every major action is recorded with actor, timestamp and context.',
+      description: 'Review recent activity, approvals and important changes in one timeline.',
       searchPlaceholder: 'Search action, message or actor',
       system: 'system',
       levels: { info: 'info', warning: 'warning', error: 'error' },
@@ -235,9 +235,9 @@ export const translations = {
       previewDescription: 'Navigation, dashboard, forms, messages, statuses, roles and modal cards react to the selected language.',
     },
     docs: {
-      titleEyebrow: 'Technical documentation',
-      title: 'System notes for publication and maintenance',
-      description: 'The repository includes markdown docs. This screen keeps the essentials available inside the app.',
+      titleEyebrow: 'Workspace guide',
+      title: 'Helpful guidance for daily use',
+      description: 'Keep key product guidance inside the workspace so the team can find it quickly.',
       sections: [
         {
           title: 'Frontend experience',
@@ -371,13 +371,13 @@ export const translations = {
       current: 'Actual',
     },
     nav: {
-      dashboard: { label: 'Dashboard', description: 'Resumen operativo compacto' },
-      products: { label: 'Productos', description: 'Catálogo responsive en tarjetas' },
-      sales: { label: 'Ventas', description: 'Lista legible de ventas con modal de detalle' },
-      movements: { label: 'Movimientos', description: 'Ajustes de stock e historial completo' },
+      dashboard: { label: 'Dashboard', description: 'Vista diaria y prioridades' },
+      products: { label: 'Productos', description: 'Catálogo, precios y salud del stock' },
+      sales: { label: 'Ventas', description: 'Pedidos, totales y detalle de ventas' },
+      movements: { label: 'Movimientos', description: 'Cambios de inventario e historial' },
       logs: { label: 'Logs', description: 'Auditoría y acciones del sistema' },
       profile: { label: 'Perfil', description: 'Información personal y personal' },
-      settings: { label: 'Configuración', description: 'Idioma y preferencias del espacio' },
+      settings: { label: 'Configuración', description: 'Apariencia, idioma y preferencias de cuenta' },
       docs: { label: 'Docs', description: 'Notas técnicas y resumen del release' },
     },
     login: {
@@ -390,8 +390,8 @@ export const translations = {
     },
     dashboard: {
       liveSummary: 'Resumen en vivo',
-      compactTitle: 'Dashboard compacto para leer más rápido',
-      compactDescription: 'Tarjetas más chicas, layout más denso y jerarquía más limpia para desktop y móvil.',
+      compactTitle: 'Dashboard claro para leer más rápido',
+      compactDescription: 'Jerarquía más clara, mejor ritmo visual y densidad cómoda para cualquier pantalla.',
       staff: 'personas',
       products: 'productos',
       sales: 'ventas',
@@ -416,7 +416,7 @@ export const translations = {
       editModalSubtitle: 'Actualiza los campos del producto y guarda los cambios.',
       deleteTitle: 'Eliminar producto',
       deleteSubtitle: 'Esto quitará {{name}} del catálogo.',
-      productActionsNote: 'Las acciones del producto persisten en la base de datos y actualizan la analítica.',
+      productActionsNote: 'Mantené precios, objetivos de stock y datos del catálogo en un solo lugar.',
       stockChangesHandled: 'Los cambios de stock se manejan en Movimientos',
       stockChangesDescription: 'Así los cambios de inventario quedan auditables y consistentes.',
       initialStock: 'Stock inicial',
@@ -462,7 +462,7 @@ export const translations = {
     },
     logs: {
       title: 'Logs de auditoría',
-      description: 'Cada acción importante queda registrada con actor, fecha y contexto.',
+      description: 'Revisá actividad reciente, aprobaciones y cambios importantes en una sola línea de tiempo.',
       searchPlaceholder: 'Buscar acción, mensaje o actor',
       system: 'sistema',
       levels: { info: 'info', warning: 'warning', error: 'error' },
@@ -494,9 +494,9 @@ export const translations = {
       previewDescription: 'Navegación, dashboard, formularios, mensajes, estados, roles y modales reaccionan al idioma elegido.',
     },
     docs: {
-      titleEyebrow: 'Documentación técnica',
-      title: 'Notas del sistema para publicación y mantenimiento',
-      description: 'El repositorio incluye documentación markdown. Esta pantalla mantiene lo esencial disponible dentro de la app.',
+      titleEyebrow: 'Guía del espacio',
+      title: 'Ayuda útil para el trabajo diario',
+      description: 'Mantené la orientación clave dentro del espacio para que el equipo la encuentre rápido.',
       sections: [
         {
           title: 'Experiencia frontend',
@@ -630,13 +630,13 @@ export const translations = {
       current: 'Текущий',
     },
     nav: {
-      dashboard: { label: 'Дашборд', description: 'Компактный операционный обзор' },
-      products: { label: 'Товары', description: 'Адаптивные карточки каталога' },
-      sales: { label: 'Продажи', description: 'Читаемый список продаж с модальным окном' },
-      movements: { label: 'Движения', description: 'Корректировки склада и полная история' },
+      dashboard: { label: 'Дашборд', description: 'Ежедневная картина и приоритеты' },
+      products: { label: 'Товары', description: 'Каталог, цены и состояние остатков' },
+      sales: { label: 'Продажи', description: 'Заказы, суммы и детали продаж' },
+      movements: { label: 'Движения', description: 'Изменения запасов и история' },
       logs: { label: 'Логи', description: 'Аудит и действия системы' },
       profile: { label: 'Профиль', description: 'Личные данные и управление персоналом' },
-      settings: { label: 'Настройки', description: 'Язык и предпочтения рабочего пространства' },
+      settings: { label: 'Настройки', description: 'Оформление, язык и параметры аккаунта' },
       docs: { label: 'Документация', description: 'Технические заметки и сводка релиза' },
     },
     login: {
@@ -649,7 +649,7 @@ export const translations = {
     },
     dashboard: {
       liveSummary: 'Живая сводка',
-      compactTitle: 'Компактный дашборд для быстрого просмотра',
+      compactTitle: 'Понятный дашборд для быстрого просмотра',
       compactDescription: 'Меньше карточки, плотнее сетка и чище иерархия для десктопа и мобильных.',
       staff: 'сотрудников',
       products: 'товаров',
@@ -675,7 +675,7 @@ export const translations = {
       editModalSubtitle: 'Обновите поля товара ниже и сохраните изменения.',
       deleteTitle: 'Удалить товар',
       deleteSubtitle: 'Товар {{name}} будет удалён из каталога.',
-      productActionsNote: 'Действия с товаром сохраняются в базе и обновляют аналитику.',
+      productActionsNote: 'Обновляйте цены, целевые остатки и данные каталога в одном месте.',
       stockChangesHandled: 'Изменения склада выполняются в разделе Движения',
       stockChangesDescription: 'Так изменения остатков остаются прозрачными и согласованными.',
       initialStock: 'Начальный остаток',
@@ -721,7 +721,7 @@ export const translations = {
     },
     logs: {
       title: 'Журнал аудита',
-      description: 'Каждое важное действие записывается вместе с исполнителем, временем и контекстом.',
+      description: 'Просматривайте недавнюю активность, подтверждения и важные изменения в одной ленте.',
       searchPlaceholder: 'Поиск по действию, сообщению или исполнителю',
       system: 'система',
       levels: { info: 'info', warning: 'warning', error: 'error' },
@@ -753,9 +753,9 @@ export const translations = {
       previewDescription: 'Навигация, дашборд, формы, сообщения, статусы, роли и модальные карточки реагируют на выбранный язык.',
     },
     docs: {
-      titleEyebrow: 'Техническая документация',
-      title: 'Системные заметки для публикации и поддержки',
-      description: 'В репозитории есть markdown-документация. Этот экран сохраняет главное прямо внутри приложения.',
+      titleEyebrow: 'Справка по рабочему пространству',
+      title: 'Полезные материалы для ежедневной работы',
+      description: 'Держите ключевые подсказки внутри рабочего пространства, чтобы команда быстро их находила.',
       sections: [
         {
           title: 'Frontend',
