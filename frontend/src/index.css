@@ -347,7 +347,8 @@ h4 {
 .filter-pills,
 .button-row.wrap,
 .control-row.wrap,
-.card-actions {
+.card-actions,
+.language-switch-row {
   display: flex;
   flex-wrap: wrap;
 }
@@ -633,19 +634,6 @@ h4 {
 
 .form-grid.compact {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.modal-form-grid {
-  padding-top: 0.2rem;
-}
-
-.modal-form-grid .callout {
-  height: 100%;
-  align-content: center;
-}
-
-.modal-actions {
-  margin-top: 0.2rem;
 }
 
 .span-full {

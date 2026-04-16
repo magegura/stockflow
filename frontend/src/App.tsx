@@ -1,19 +1,20 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
 import { AuditLog, Dashboard, Movement, Product, Sale, User } from './types'
+import {
+  getStoredLanguage,
+  I18n,
+  interpolate,
+  Language,
+  languageOptions,
+  localeByLanguage,
+  STORAGE_LANGUAGE_KEY,
+  translateBackendMessage,
+  translations,
+} from './i18n'
 
 const API_URL = import.meta.env.VITE_API_URL || '/api'
 
-const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: '📊', description: 'Compact operational overview' },
-  { id: 'products', label: 'Products', icon: '📦', description: 'Responsive product catalog cards' },
-  { id: 'sales', label: 'Sales', icon: '🧾', description: 'Readable sales list with details modal' },
-  { id: 'movements', label: 'Movements', icon: '🔁', description: 'Stock adjustments and full history' },
-  { id: 'logs', label: 'Logs', icon: '🪵', description: 'Audit trail and system actions' },
-  { id: 'profile', label: 'Profile', icon: '👤', description: 'Personal info and staff management' },
-  { id: 'docs', label: 'Docs', icon: '📚', description: 'Technical notes and release summary' },
-] as const
-
-type Tab = (typeof NAV_ITEMS)[number]['id']
+type Tab = 'dashboard' | 'products' | 'sales' | 'movements' | 'logs' | 'profile' | 'settings' | 'docs'
 type StockFilter = 'all' | 'low' | 'out'
 type LogFilter = 'all' | 'info' | 'warning' | 'error'
 type StaffStatus = 'active' | 'on_leave' | 'inactive'
@@ -22,45 +23,28 @@ type SaleLine = { id: number; product_id: string; quantity: string }
 
 type ApiError = { detail?: string; message?: string }
 
-const docsSections = [
-  {
-    title: 'Frontend experience',
-    items: [
-      'Bright responsive UI with collapsible sidebar and mobile burger menu',
-      'Product catalog rendered as adaptive cards using CSS grid',
-      'Sales and movements shown as clean list rows with modal detail cards',
-      'All destructive or meaningful actions feed back success or failure messages',
-    ],
-  },
-  {
-    title: 'Backend capabilities',
-    items: [
-      'FastAPI + SQLAlchemy with PostgreSQL-ready configuration via DATABASE_URL',
-      'JWT auth, role checks and audit logging for business-critical actions',
-      'Personnel profiles backed by a dedicated EmployeeProfile table',
-      'Product CRUD persists directly to the database and updates dashboard metrics',
-    ],
-  },
-  {
-    title: 'Operational modules',
-    items: [
-      'Dashboard with KPIs, trend bars, top products and low-stock watchlist',
-      'Products with create, update, delete and stock health status',
-      'Sales with multi-line creation, stock deduction and movement generation',
-      'Logs and documentation kept available inside the application itself',
-    ],
-  },
-]
-
-function buildNetworkError(url: string, path: string, error: unknown): Error {
-  if (error instanceof DOMException && error.name === 'AbortError') {
-    return new Error(`The request to ${path} timed out. The backend may be redeploying or unavailable.`)
-  }
-
-  return new Error(`Could not reach the API at ${url}. Check backend deployment status, VITE_API_URL and CORS_ORIGINS.`)
+function navItems(t: I18n) {
+  return [
+    { id: 'dashboard' as const, label: t.nav.dashboard.label, icon: '📊', description: t.nav.dashboard.description },
+    { id: 'products' as const, label: t.nav.products.label, icon: '📦', description: t.nav.products.description },
+    { id: 'sales' as const, label: t.nav.sales.label, icon: '🧾', description: t.nav.sales.description },
+    { id: 'movements' as const, label: t.nav.movements.label, icon: '🔁', description: t.nav.movements.description },
+    { id: 'logs' as const, label: t.nav.logs.label, icon: '🪵', description: t.nav.logs.description },
+    { id: 'profile' as const, label: t.nav.profile.label, icon: '👤', description: t.nav.profile.description },
+    { id: 'settings' as const, label: t.nav.settings.label, icon: '🌐', description: t.nav.settings.description },
+    { id: 'docs' as const, label: t.nav.docs.label, icon: '📚', description: t.nav.docs.description },
+  ]
 }
 
-async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+function buildNetworkError(url: string, path: string, error: unknown, t: I18n): Error {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return new Error(interpolate(t.common.timeout, { path }))
+  }
+
+  return new Error(interpolate(t.common.apiUnavailable, { url }))
+}
+
+async function request<T>(path: string, t: I18n, options: RequestInit = {}, token?: string): Promise<T> {
   const url = `${API_URL}${path}`
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), 15000)
@@ -78,7 +62,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
       },
     })
   } catch (error) {
-    throw buildNetworkError(url, path, error)
+    throw buildNetworkError(url, path, error, t)
   } finally {
     window.clearTimeout(timeoutId)
   }
@@ -87,45 +71,86 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     const errorBody = (await response.json().catch(() => ({}))) as ApiError
     const detail = errorBody.detail || errorBody.message
 
-    if (detail) throw new Error(`${detail} (HTTP ${response.status})`)
-    if (response.status === 401) throw new Error('Authentication failed. Check the email, password or session token. (HTTP 401)')
-    if (response.status === 403) throw new Error('You do not have permission to perform this action. (HTTP 403)')
-    if (response.status >= 500) throw new Error(`Server error while calling ${path}. Check backend logs. (HTTP ${response.status})`)
-    throw new Error(`Request failed for ${path}. (HTTP ${response.status})`)
+    if (detail) throw new Error(`${translateBackendMessage(detail, t)} (HTTP ${response.status})`)
+    if (response.status === 401) throw new Error(t.common.authFailed)
+    if (response.status === 403) throw new Error(t.common.noPermission)
+    if (response.status >= 500) throw new Error(interpolate(t.common.serverError, { path, status: response.status }))
+    throw new Error(interpolate(t.common.requestFailed, { path, status: response.status }))
   }
 
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
-function currency(value: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
+function currency(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
 }
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString()
+function formatDate(value: string, locale: string): string {
+  return new Date(value).toLocaleString(locale)
 }
 
-function shortDate(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function shortDate(value: string, locale: string): string {
+  return new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
-function getStatus(product: Product): { label: string; className: string } {
-  if (product.stock === 0) return { label: 'Out', className: 'status out' }
-  if (product.stock <= product.min_stock) return { label: 'Low', className: 'status low' }
-  return { label: 'OK', className: 'status ok' }
+function getStatus(product: Product, t: I18n): { label: string; className: string } {
+  if (product.stock === 0) return { label: t.common.out, className: 'status out' }
+  if (product.stock <= product.min_stock) return { label: t.common.low, className: 'status low' }
+  return { label: t.common.ok, className: 'status ok' }
 }
 
-function humanizeAction(value: string): string {
-  return value.replace(/\./g, ' · ').replace(/_/g, ' ')
+function translateRole(value: User['role'], t: I18n): string {
+  return value === 'admin' ? t.common.admin : t.common.employee
 }
 
-function detailsToText(details: Record<string, unknown>): string {
+function translateStatus(value: StaffStatus, t: I18n): string {
+  if (value === 'active') return t.common.active
+  if (value === 'on_leave') return t.common.onLeave
+  return t.common.inactive
+}
+
+function translateHierarchy(value: StaffLevel, t: I18n): string {
+  if (value === 'lead') return t.common.lead
+  if (value === 'management') return t.common.management
+  return t.common.staff
+}
+
+function translateMovementType(value: Movement['movement_type'] | 'purchase' | 'adjustment' | 'writeoff' | 'sale', t: I18n): string {
+  if (value === 'purchase') return t.movements.purchase
+  if (value === 'adjustment') return t.movements.adjustment
+  if (value === 'writeoff') return t.movements.writeoff
+  return t.movements.sale
+}
+
+function translateLogLevel(value: string, t: I18n): string {
+  if (value === 'warning') return t.logs.levels.warning
+  if (value === 'error') return t.logs.levels.error
+  return t.logs.levels.info
+}
+
+function humanizeAction(value: string, t: I18n): string {
+  const known: Record<string, string> = {
+    'auth.login': t.login.signIn,
+    'profile.update': t.profile.saveProfile,
+    'user.create': t.profile.createStaffMember,
+    'user.update': t.profile.saveStaffMember,
+    'product.create': t.products.createProductButton,
+    'product.update': t.products.saveChanges,
+    'product.delete': t.products.delete,
+    'movement.create': t.movements.saveMovement,
+    'sale.create': t.sales.createSaleButton,
+    'demo.populate': t.common.syncDemoData,
+  }
+  return known[value] || value.replace(/\./g, ' · ').replace(/_/g, ' ')
+}
+
+function detailsToText(details: Record<string, unknown>, t: I18n): string {
   const items = Object.entries(details)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
     .slice(0, 4)
 
-  if (items.length === 0) return 'No additional details.'
+  if (items.length === 0) return t.common.noAdditionalDetails
   return items.map(([key, value]) => `${key}: ${Array.isArray(value) ? `${value.length} item(s)` : String(value)}`).join(' · ')
 }
 
@@ -139,17 +164,17 @@ function MetricCard({ label, value, hint }: { label: string; value: string | num
   )
 }
 
-function Modal({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode }) {
+function Modal({ title, subtitle, onClose, children, closeLabel }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; closeLabel: string }) {
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true">
-      <button className="modal-backdrop" type="button" onClick={onClose} aria-label="Close details" />
+      <button className="modal-backdrop" type="button" onClick={onClose} aria-label={closeLabel} />
       <div className="modal-card">
         <div className="modal-head">
           <div>
             <h3>{title}</h3>
             {subtitle ? <p className="muted small">{subtitle}</p> : null}
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close modal">
+          <button className="icon-button" type="button" onClick={onClose} aria-label={closeLabel}>
             ✕
           </button>
         </div>
@@ -160,6 +185,10 @@ function Modal({ title, subtitle, onClose, children }: { title: string; subtitle
 }
 
 function App() {
+  const [language, setLanguage] = useState<Language>(getStoredLanguage)
+  const t = translations[language]
+  const locale = localeByLanguage[language]
+
   const [token, setToken] = useState<string | null>(localStorage.getItem('stockflow_token'))
   const [user, setUser] = useState<User | null>(null)
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
@@ -205,7 +234,9 @@ function App() {
     bio: '',
   })
 
-  const currentTabMeta = NAV_ITEMS.find((item) => item.id === tab) ?? NAV_ITEMS[0]
+  const items = useMemo(() => navItems(t), [t])
+  const currentTabMeta = items.find((item) => item.id === tab) ?? items[0]
+  const docsSections = t.docs.sections
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -251,18 +282,18 @@ function App() {
     setIsLoading(true)
     setError(null)
     try {
-      const meData = await request<User>('/me', {}, currentToken)
+      const meData = await request<User>('/me', t, {}, currentToken)
       const [dashboardData, productsData, salesData, movementsData, logsData] = await Promise.all([
-        request<Dashboard>('/dashboard', {}, currentToken),
-        request<{ items: Product[] }>('/products?page=1&page_size=100', {}, currentToken),
-        request<{ items: Sale[] }>('/sales?page=1&page_size=50', {}, currentToken),
-        request<{ items: Movement[] }>('/stock-movements?page=1&page_size=50', {}, currentToken),
-        request<{ items: AuditLog[] }>('/logs?page=1&page_size=50', {}, currentToken),
+        request<Dashboard>('/dashboard', t, {}, currentToken),
+        request<{ items: Product[] }>('/products?page=1&page_size=100', t, {}, currentToken),
+        request<{ items: Sale[] }>('/sales?page=1&page_size=50', t, {}, currentToken),
+        request<{ items: Movement[] }>('/stock-movements?page=1&page_size=50', t, {}, currentToken),
+        request<{ items: AuditLog[] }>('/logs?page=1&page_size=50', t, {}, currentToken),
       ])
 
       let staffItems: User[] = []
       if (meData.role === 'admin') {
-        const usersData = await request<{ items: User[] }>('/users', {}, currentToken)
+        const usersData = await request<{ items: User[] }>('/users', t, {}, currentToken)
         staffItems = usersData.items
       }
 
@@ -282,7 +313,7 @@ function App() {
       setLogs(logsData.items)
       setStaff(staffItems)
     } catch (err) {
-      const text = err instanceof Error ? err.message : 'Could not load data'
+      const text = err instanceof Error ? translateBackendMessage(err.message, t) : t.common.couldNotLoadData
       setError(text)
       if (text.toLowerCase().includes('token') || text.toLowerCase().includes('bearer') || text.toLowerCase().includes('expired')) {
         handleLogout()
@@ -307,6 +338,11 @@ function App() {
   }, [sidebarCollapsed])
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_LANGUAGE_KEY, language)
+    document.documentElement.lang = language
+  }, [language])
+
+  useEffect(() => {
     const onResize = () => {
       if (window.innerWidth > 960) setMobileNavOpen(false)
     }
@@ -318,12 +354,6 @@ function App() {
     setEditingProductId(null)
     setIsProductModalOpen(false)
     setProductForm({ name: '', sku: '', price: '0', stock: '0', min_stock: '0' })
-  }
-
-  const openCreateProductModal = () => {
-    setEditingProductId(null)
-    setProductForm({ name: '', sku: '', price: '0', stock: '0', min_stock: '0' })
-    setIsProductModalOpen(true)
   }
 
   const resetSaleForm = () => {
@@ -353,19 +383,24 @@ function App() {
     setMobileNavOpen(false)
   }
 
+  const handleLanguageChange = (nextLanguage: Language) => {
+    setLanguage(nextLanguage)
+    setMessage(translations[nextLanguage].common.languageUpdated)
+  }
+
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault()
     setIsLoading(true)
     setError(null)
     setMessage(null)
     try {
-      const response = await request<{ access_token: string; user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(loginForm) })
+      const response = await request<{ access_token: string; user: User }>('/auth/login', t, { method: 'POST', body: JSON.stringify(loginForm) })
       localStorage.setItem('stockflow_token', response.access_token)
       setToken(response.access_token)
       setUser(response.user)
-      setMessage(`Welcome, ${response.user.name}`)
+      setMessage(interpolate(t.common.welcome, { name: response.user.name }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.loginFailed)
     } finally {
       setIsLoading(false)
     }
@@ -387,7 +422,6 @@ function App() {
     setMobileNavOpen(false)
     setSelectedSale(null)
     setSelectedMovement(null)
-    setProductPendingDelete(null)
     resetProductForm()
     resetSaleForm()
     resetStaffForm()
@@ -396,7 +430,14 @@ function App() {
   const handleRefresh = async () => {
     if (!token) return
     await loadAll(token)
-    setMessage('Workspace refreshed')
+    setMessage(t.common.workspaceRefreshed)
+  }
+
+  const openNewProductModal = () => {
+    setEditingProductId(null)
+    setProductForm({ name: '', sku: '', price: '0', stock: '0', min_stock: '0' })
+    setIsProductModalOpen(true)
+    selectTab('products')
   }
 
   const handleSubmitProduct = async (event: FormEvent) => {
@@ -412,16 +453,16 @@ function App() {
         min_stock: Number(productForm.min_stock),
       }
       if (editingProductId) {
-        await request(`/products/${editingProductId}`, { method: 'PUT', body: JSON.stringify(payload) }, token)
-        setMessage('Product updated successfully')
+        await request(`/products/${editingProductId}`, t, { method: 'PUT', body: JSON.stringify(payload) }, token)
+        setMessage(t.common.productUpdated)
       } else {
-        await request('/products', { method: 'POST', body: JSON.stringify({ ...payload, stock: Number(productForm.stock) }) }, token)
-        setMessage('Product created successfully')
+        await request('/products', t, { method: 'POST', body: JSON.stringify({ ...payload, stock: Number(productForm.stock) }) }, token)
+        setMessage(t.common.productCreated)
       }
       resetProductForm()
       await loadAll(token)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save product')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.saveProductFailed)
     }
   }
 
@@ -441,13 +482,13 @@ function App() {
   const handleDeleteProduct = async (product: Product) => {
     if (!token) return
     try {
-      await request(`/products/${product.id}`, { method: 'DELETE' }, token)
-      if (editingProductId === product.id) resetProductForm()
+      await request(`/products/${product.id}`, t, { method: 'DELETE' }, token)
       setProductPendingDelete(null)
+      if (editingProductId === product.id) resetProductForm()
       await loadAll(token)
-      setMessage('Product deleted successfully')
+      setMessage(t.common.productDeleted)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not delete product')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.deleteProductFailed)
     }
   }
 
@@ -457,6 +498,7 @@ function App() {
     try {
       await request(
         '/stock-movements',
+        t,
         {
           method: 'POST',
           body: JSON.stringify({
@@ -470,9 +512,9 @@ function App() {
       )
       setMovementForm({ product_id: '', movement_type: 'purchase', quantity: '1', note: '' })
       await loadAll(token)
-      setMessage('Stock movement saved successfully')
+      setMessage(t.common.stockMovementSaved)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save movement')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.saveMovementFailed)
     }
   }
 
@@ -492,22 +534,22 @@ function App() {
   const handleCreateSale = async (event: FormEvent) => {
     event.preventDefault()
     if (!token) return
-    const items = saleLines
+    const itemsForSale = saleLines
       .filter((line) => line.product_id && Number(line.quantity) > 0)
       .map((line) => ({ product_id: Number(line.product_id), quantity: Number(line.quantity) }))
 
-    if (items.length === 0) {
-      setError('Add at least one sale item')
+    if (itemsForSale.length === 0) {
+      setError(t.common.addAtLeastOneSaleItem)
       return
     }
 
     try {
-      await request('/sales', { method: 'POST', body: JSON.stringify({ items }) }, token)
+      await request('/sales', t, { method: 'POST', body: JSON.stringify({ items: itemsForSale }) }, token)
       resetSaleForm()
       await loadAll(token)
-      setMessage('Sale created successfully')
+      setMessage(t.common.saleCreated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create sale')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.createSaleFailed)
     }
   }
 
@@ -515,11 +557,19 @@ function App() {
     if (!token || user?.role !== 'admin') return
     setIsLoading(true)
     try {
-      const response = await request<{ message: string; totals: { products: number; sales: number; movements: number; logs: number } }>('/demo/populate', { method: 'POST' }, token)
+      const response = await request<{ message: string; totals: { products: number; sales: number; movements: number; logs: number } }>('/demo/populate', t, { method: 'POST' }, token)
       await loadAll(token)
-      setMessage(`${response.message}: ${response.totals.products} products, ${response.totals.sales} sales, ${response.totals.movements} movements, ${response.totals.logs} logs.`)
+      setMessage(
+        interpolate(t.common.demoSyncResult, {
+          message: translateBackendMessage(response.message, t),
+          products: response.totals.products,
+          sales: response.totals.sales,
+          movements: response.totals.movements,
+          logs: response.totals.logs,
+        }),
+      )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not sync demo data')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.syncDemoDataFailed)
     } finally {
       setIsLoading(false)
     }
@@ -529,20 +579,20 @@ function App() {
     event.preventDefault()
     if (!token) return
     try {
-      const response = await request<{ message: string; user: User }>('/profile', { method: 'PUT', body: JSON.stringify(profileForm) }, token)
+      const response = await request<{ message: string; user: User }>('/profile', t, { method: 'PUT', body: JSON.stringify(profileForm) }, token)
       setUser(response.user)
       setProfileForm({
         name: response.user.name,
         email: response.user.email,
         phone: response.user.phone || '',
-        department: response.user.department,
-        title: response.user.title,
+        department: response.user.department || '',
+        title: response.user.title || '',
         bio: response.user.bio || '',
       })
       await loadAll(token)
-      setMessage('Profile updated successfully')
+      setMessage(t.common.profileUpdated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update profile')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.updateProfileFailed)
     }
   }
 
@@ -568,16 +618,16 @@ function App() {
     if (!token || user?.role !== 'admin') return
     try {
       if (editingStaffId) {
-        await request(`/users/${editingStaffId}`, { method: 'PUT', body: JSON.stringify({ ...staffForm, password: undefined }) }, token)
-        setMessage('Staff member updated successfully')
+        await request(`/users/${editingStaffId}`, t, { method: 'PUT', body: JSON.stringify({ ...staffForm, password: undefined }) }, token)
+        setMessage(t.common.staffUpdated)
       } else {
-        await request('/users', { method: 'POST', body: JSON.stringify(staffForm) }, token)
-        setMessage('Staff member created successfully')
+        await request('/users', t, { method: 'POST', body: JSON.stringify(staffForm) }, token)
+        setMessage(t.common.staffCreated)
       }
       resetStaffForm()
       await loadAll(token)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save staff member')
+      setError(err instanceof Error ? translateBackendMessage(err.message, t) : t.common.saveStaffFailed)
     }
   }
 
@@ -586,35 +636,47 @@ function App() {
       <div className="auth-shell">
         <div className="auth-card auth-grid">
           <div className="stack-lg">
+            <div className="language-switch-row">
+              {languageOptions.map((option) => (
+                <button
+                  key={option.value}
+                  className={language === option.value ? 'pill active' : 'pill'}
+                  type="button"
+                  onClick={() => handleLanguageChange(option.value)}
+                >
+                  {option.nativeLabel}
+                </button>
+              ))}
+            </div>
             <div>
-              <span className="eyebrow">Publication-ready business app</span>
-              <h1>StockFlow</h1>
-              <p className="muted">Inventory, sales, personnel profiles and audit logs in one bright responsive workspace.</p>
+              <span className="eyebrow">{t.publicationReady}</span>
+              <h1>{t.appName}</h1>
+              <p className="muted">{t.authSubtitle}</p>
             </div>
             <div className="feature-list inline">
               <span className="feature-pill">FastAPI</span>
               <span className="feature-pill">React + TypeScript</span>
-              <span className="feature-pill">Profiles</span>
-              <span className="feature-pill">Logs</span>
-              <span className="feature-pill">Responsive</span>
+              <span className="feature-pill">{t.nav.profile.label}</span>
+              <span className="feature-pill">{t.nav.logs.label}</span>
+              <span className="feature-pill">{t.misc.responsive}</span>
             </div>
             <div className="callout">
-              <strong>Demo accounts</strong>
-              <p>Admin: admin@stockflow.app / Admin123!</p>
-              <p>Employee: employee@stockflow.app / Employee123!</p>
+              <strong>{t.login.demoAccounts}</strong>
+              <p>{t.login.adminAccount}</p>
+              <p>{t.login.employeeAccount}</p>
             </div>
           </div>
 
           <form className="stack" onSubmit={handleLogin}>
             <label>
-              Email
+              {t.common.email}
               <input type="email" value={loginForm.email} onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))} />
             </label>
             <label>
-              Password
+              {t.login.password}
               <input type="password" value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
             </label>
-            <button type="submit" disabled={isLoading}>{isLoading ? 'Signing in...' : 'Sign in'}</button>
+            <button type="submit" disabled={isLoading}>{isLoading ? t.login.signingIn : t.login.signIn}</button>
             {error ? <div className="alert error">{error}</div> : null}
             {message ? <div className="alert success">{message}</div> : null}
           </form>
@@ -632,8 +694,8 @@ function App() {
           <div className="brand-row">
             <div className="brand-mark">SF</div>
             <div className="brand-copy">
-              <span className="eyebrow">StockFlow</span>
-              <h2>Business Workspace</h2>
+              <span className="eyebrow">{t.appName}</span>
+              <h2>{t.workspaceName}</h2>
             </div>
           </div>
           <button className="icon-button desktop-only" type="button" onClick={() => setSidebarCollapsed((current) => !current)}>
@@ -644,11 +706,11 @@ function App() {
         <div className="user-box">
           <strong>{user.name}</strong>
           <span>{user.email}</span>
-          <span className={`role-pill role-${user.role}`}>{user.role}</span>
+          <span className={`role-pill role-${user.role}`}>{translateRole(user.role, t)}</span>
         </div>
 
         <nav className="nav-list">
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <button key={item.id} className={item.id === tab ? 'nav-button active' : 'nav-button'} onClick={() => selectTab(item.id)} type="button" title={item.label}>
               <span className="nav-icon">{item.icon}</span>
               <span className="nav-copy">
@@ -660,14 +722,14 @@ function App() {
         </nav>
 
         <div className="sidebar-note">
-          <strong>Ready for review</strong>
-          <p className="muted small">Bright UI, audit visibility, real CRUD, personnel profiles and mobile-friendly behavior.</p>
+          <strong>{t.readyForReview}</strong>
+          <p className="muted small">{t.readyForReviewNote}</p>
         </div>
 
         <div className="sidebar-actions">
-          <button className="secondary" type="button" onClick={() => void handleRefresh()}>Refresh data</button>
-          {user.role === 'admin' ? <button className="secondary" type="button" onClick={() => void handlePopulateDemoData()}>Sync demo data</button> : null}
-          <button className="ghost" type="button" onClick={handleLogout}>Logout</button>
+          <button className="secondary" type="button" onClick={() => void handleRefresh()}>{t.common.refreshData}</button>
+          {user.role === 'admin' ? <button className="secondary" type="button" onClick={() => void handlePopulateDemoData()}>{t.common.syncDemoData}</button> : null}
+          <button className="ghost" type="button" onClick={handleLogout}>{t.common.logout}</button>
         </div>
       </aside>
 
@@ -676,15 +738,15 @@ function App() {
           <div className="topbar-main">
             <button className="icon-button mobile-only" type="button" onClick={() => setMobileNavOpen(true)}>☰</button>
             <div>
-              <span className="eyebrow">Operational workspace</span>
+              <span className="eyebrow">{t.operationalWorkspace}</span>
               <h1>{currentTabMeta.label}</h1>
               <p className="muted">{currentTabMeta.description}</p>
             </div>
           </div>
-          <button className="ghost compact" type="button" onClick={() => void handleRefresh()}>Refresh</button>
+          <button className="ghost compact" type="button" onClick={() => void handleRefresh()}>{t.common.refresh}</button>
         </header>
 
-        {isLoading ? <div className="alert">Loading data...</div> : null}
+        {isLoading ? <div className="alert">{t.common.loadingData}</div> : null}
         {error ? <div className="alert error">{error}</div> : null}
         {message ? <div className="alert success">{message}</div> : null}
 
@@ -692,31 +754,31 @@ function App() {
           <section className="stack-xl">
             <section className="panel compact-hero">
               <div>
-                <span className="eyebrow">Live summary</span>
-                <h3>Compact dashboard for faster scanning</h3>
-                <p className="muted small">Smaller cards, denser layout and cleaner hierarchy for desktop and mobile.</p>
+                <span className="eyebrow">{t.dashboard.liveSummary}</span>
+                <h3>{t.dashboard.compactTitle}</h3>
+                <p className="muted small">{t.dashboard.compactDescription}</p>
               </div>
               <div className="hero-pills">
-                <span className="feature-pill">{staff.length || 2} staff</span>
-                <span className="feature-pill">{products.length} products</span>
-                <span className="feature-pill">{sales.length} sales</span>
+                <span className="feature-pill">{staff.length || 2} {t.dashboard.staff}</span>
+                <span className="feature-pill">{products.length} {t.dashboard.products}</span>
+                <span className="feature-pill">{sales.length} {t.dashboard.sales}</span>
               </div>
             </section>
 
             <div className="metrics-grid">
-              <MetricCard label="Products" value={dashboard.total_products} hint="Catalog size" />
-              <MetricCard label="Low stock" value={dashboard.low_stock_count} hint="Needs restock" />
-              <MetricCard label="Out of stock" value={dashboard.out_of_stock_count} hint="Unavailable" />
-              <MetricCard label="Sales" value={dashboard.total_sales_count} hint="Completed orders" />
-              <MetricCard label="Revenue" value={currency(dashboard.revenue)} hint="Seeded performance" />
-              <MetricCard label="Stock value" value={currency(dashboard.stock_value)} hint="Current inventory" />
+              <MetricCard label={t.dashboard.metrics.products.label} value={dashboard.total_products} hint={t.dashboard.metrics.products.hint} />
+              <MetricCard label={t.dashboard.metrics.lowStock.label} value={dashboard.low_stock_count} hint={t.dashboard.metrics.lowStock.hint} />
+              <MetricCard label={t.dashboard.metrics.outOfStock.label} value={dashboard.out_of_stock_count} hint={t.dashboard.metrics.outOfStock.hint} />
+              <MetricCard label={t.dashboard.metrics.sales.label} value={dashboard.total_sales_count} hint={t.dashboard.metrics.sales.hint} />
+              <MetricCard label={t.dashboard.metrics.revenue.label} value={currency(dashboard.revenue, locale)} hint={t.dashboard.metrics.revenue.hint} />
+              <MetricCard label={t.dashboard.metrics.stockValue.label} value={currency(dashboard.stock_value, locale)} hint={t.dashboard.metrics.stockValue.hint} />
             </div>
 
             <div className="dashboard-grid">
               <section className="panel">
                 <div className="section-head">
-                  <h3>Revenue trend</h3>
-                  <span className="muted small">7 recent days</span>
+                  <h3>{t.dashboard.revenueTrend}</h3>
+                  <span className="muted small">{t.dashboard.recentDays}</span>
                 </div>
                 <div className="trend-chart compact-chart">
                   {dashboard.revenue_by_day.map((point) => {
@@ -725,8 +787,8 @@ function App() {
                     return (
                       <div className="trend-item" key={point.day}>
                         <div className="trend-bar-wrap"><div className="trend-bar" style={{ height }} /></div>
-                        <span className="muted small">{shortDate(point.day)}</span>
-                        <strong className="small">{currency(point.revenue)}</strong>
+                        <span className="muted small">{shortDate(point.day, locale)}</span>
+                        <strong className="small">{currency(point.revenue, locale)}</strong>
                       </div>
                     )
                   })}
@@ -735,7 +797,7 @@ function App() {
 
               <section className="panel two-col-card">
                 <div className="mini-list-block">
-                  <div className="section-head"><h3>Top products</h3></div>
+                  <div className="section-head"><h3>{t.dashboard.topProducts}</h3></div>
                   <div className="stack-sm">
                     {dashboard.top_products.map((item) => (
                       <div className="mini-row" key={item.id}>
@@ -745,17 +807,17 @@ function App() {
                         </div>
                         <div className="align-right">
                           <strong>{item.quantity_sold}</strong>
-                          <div className="muted small">{currency(item.revenue)}</div>
+                          <div className="muted small">{currency(item.revenue, locale)}</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div className="mini-list-block">
-                  <div className="section-head"><h3>Low stock</h3></div>
+                  <div className="section-head"><h3>{t.dashboard.lowStock}</h3></div>
                   <div className="stack-sm">
                     {dashboard.low_stock_products.length === 0 ? (
-                      <p className="muted small">Everything is healthy.</p>
+                      <p className="muted small">{t.dashboard.everythingHealthy}</p>
                     ) : (
                       dashboard.low_stock_products.map((product) => (
                         <div className="mini-row" key={product.id}>
@@ -776,26 +838,39 @@ function App() {
 
         {tab === 'products' ? (
           <section className="stack-xl">
+            {user.role === 'admin' ? (
+              <section className="panel">
+                <div className="section-head wrap-row">
+                  <div>
+                    <h3>{t.products.createProduct}</h3>
+                    <p className="muted small">{t.products.productActionsNote}</p>
+                  </div>
+                  <div className="button-row wrap">
+                    <button type="button" onClick={openNewProductModal}>{t.products.createProductButton}</button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             <section className="panel">
               <div className="section-head wrap-row">
                 <div>
-                  <h3>Products</h3>
-                  <p className="muted small">{products.length} total · {productSummary.low} low stock · {productSummary.out} out of stock</p>
+                  <h3>{t.products.products}</h3>
+                  <p className="muted small">{interpolate(t.products.summary, { total: products.length, low: productSummary.low, out: productSummary.out })}</p>
                 </div>
                 <div className="control-row wrap">
-                  <input className="search" placeholder="Search by name or SKU" value={search} onChange={(event) => setSearch(event.target.value)} />
+                  <input className="search" placeholder={t.products.searchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} />
                   <div className="filter-pills">
                     {(['all', 'low', 'out'] as StockFilter[]).map((item) => (
-                      <button key={item} className={stockFilter === item ? 'pill active' : 'pill'} type="button" onClick={() => setStockFilter(item)}>{item}</button>
+                      <button key={item} className={stockFilter === item ? 'pill active' : 'pill'} type="button" onClick={() => setStockFilter(item)}>{t.common[item]}</button>
                     ))}
                   </div>
-                  {user.role === 'admin' ? <button className="compact" type="button" onClick={openCreateProductModal}>New product</button> : null}
                 </div>
               </div>
 
               <div className="catalog-grid dense-cards">
                 {filteredProducts.map((product) => {
-                  const status = getStatus(product)
+                  const status = getStatus(product, t)
                   return (
                     <article className="product-card elevated" key={product.id}>
                       <div className="product-card-head">
@@ -806,15 +881,15 @@ function App() {
                         <span className={status.className}>{status.label}</span>
                       </div>
                       <div className="product-card-body">
-                        <div className="product-metric"><span className="muted small">Price</span><strong>{currency(product.price)}</strong></div>
-                        <div className="product-metric"><span className="muted small">Stock</span><strong>{product.stock}</strong></div>
-                        <div className="product-metric"><span className="muted small">Min stock</span><strong>{product.min_stock}</strong></div>
-                        <div className="product-metric span-two"><span className="muted small">Updated</span><strong>{formatDate(product.updated_at)}</strong></div>
+                        <div className="product-metric"><span className="muted small">{t.products.price}</span><strong>{currency(product.price, locale)}</strong></div>
+                        <div className="product-metric"><span className="muted small">{t.products.stock}</span><strong>{product.stock}</strong></div>
+                        <div className="product-metric"><span className="muted small">{t.products.minStock}</span><strong>{product.min_stock}</strong></div>
+                        <div className="product-metric span-two"><span className="muted small">{t.common.updated}</span><strong>{formatDate(product.updated_at, locale)}</strong></div>
                       </div>
                       {user.role === 'admin' ? (
                         <div className="card-actions">
-                          <button className="secondary compact" type="button" onClick={() => startEditProduct(product)}>Edit</button>
-                          <button className="ghost compact danger" type="button" onClick={() => setProductPendingDelete(product)}>Delete</button>
+                          <button className="secondary compact" type="button" onClick={() => startEditProduct(product)}>{t.products.edit}</button>
+                          <button className="ghost compact danger" type="button" onClick={() => setProductPendingDelete(product)}>{t.products.delete}</button>
                         </div>
                       ) : null}
                     </article>
@@ -831,67 +906,67 @@ function App() {
               <section className="panel">
                 <div className="section-head">
                   <div>
-                    <h3>Create sale</h3>
-                    <p className="muted small">Every sale deducts stock and creates related movement and audit entries.</p>
+                    <h3>{t.sales.createSale}</h3>
+                    <p className="muted small">{t.sales.createSaleDescription}</p>
                   </div>
-                  <button className="ghost" type="button" onClick={resetSaleForm}>Reset form</button>
+                  <button className="ghost" type="button" onClick={resetSaleForm}>{t.common.resetForm}</button>
                 </div>
                 <form className="stack" onSubmit={handleCreateSale}>
                   {saleLines.map((line) => (
                     <div className="sale-line" key={line.id}>
                       <label>
-                        Product
+                        {t.common.product}
                         <select value={line.product_id} onChange={(event) => updateSaleLine(line.id, { product_id: event.target.value })}>
-                          <option value="">Select a product</option>
-                          {products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku} · stock {product.stock}</option>)}
+                          <option value="">{t.sales.selectProduct}</option>
+                          {products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku} · {t.products.stock.toLowerCase()} {product.stock}</option>)}
                         </select>
                       </label>
                       <label>
-                        Quantity
+                        {t.common.quantity}
                         <input type="number" min="1" value={line.quantity} onChange={(event) => updateSaleLine(line.id, { quantity: event.target.value })} />
                       </label>
-                      <button className="ghost compact danger" type="button" onClick={() => removeSaleLine(line.id)}>Remove</button>
+                      <button className="ghost compact danger" type="button" onClick={() => removeSaleLine(line.id)}>{t.common.remove}</button>
                     </div>
                   ))}
                   <div className="button-row wrap">
-                    <button className="secondary" type="button" onClick={addSaleLine}>Add line</button>
-                    <button type="submit">Create sale</button>
+                    <button className="secondary" type="button" onClick={addSaleLine}>{t.common.addLine}</button>
+                    <button type="submit">{t.sales.createSaleButton}</button>
                   </div>
                 </form>
               </section>
 
               <section className="panel summary-card">
-                <span className="eyebrow">Sale preview</span>
-                <h3>{currency(salePreview)}</h3>
-                <p className="muted small">Calculated in real time from the selected products and quantities.</p>
+                <span className="eyebrow">{t.sales.salePreview}</span>
+                <h3>{currency(salePreview, locale)}</h3>
+                <p className="muted small">{t.sales.calculatedRealtime}</p>
                 <div className="feature-list inline">
-                  <span className="feature-pill">{saleLines.length} line(s)</span>
-                  <span className="feature-pill">DB updated</span>
-                  <span className="feature-pill">Audit logged</span>
+                  <span className="feature-pill">{saleLines.length} {t.common.lineSuffix}</span>
+                  <span className="feature-pill">{t.sales.dbUpdated}</span>
+                  <span className="feature-pill">{t.sales.auditLogged}</span>
                 </div>
               </section>
             </div>
 
             <section className="panel">
               <div className="section-head">
-                <h3>Recent sales</h3>
-                <span className="muted small">Structured list with detail modal</span>
+                <h3>{t.sales.recentSales}</h3>
+                <span className="muted small">{t.sales.structuredList}</span>
               </div>
               <div className="list-table">
                 <div className="list-table-head">
-                  <span>Sale</span>
-                  <span>Created by</span>
-                  <span>Total</span>
-                  <span>Date</span>
-                  <span>Details</span>
+                  <span>{t.sales.sale}</span>
+                  <span>{t.common.createdBy}</span>
+                  <span>{t.common.total}</span>
+                  <span>{t.common.date}</span>
+                  <span>{t.common.details}</span>
                 </div>
                 {sales.map((sale) => (
                   <div className="list-table-row" key={sale.id}>
-                    <span className="list-main">Sale #{sale.id}</span>
+                    <span className="list-main">{interpolate(t.sales.saleDetailsTitle, { id: sale.id })}</span>
                     <span>{sale.created_by_name}</span>
-                    <span>{currency(sale.total_amount)}</span>
-                    <span>{formatDate(sale.created_at)}</span>
-                    <span><button className="secondary compact" type="button" onClick={() => setSelectedSale(sale)}>More info</button></span>
+                    <span>{currency(sale.total_amount, locale)}</span>
+                    <span>{formatDate(sale.created_at, locale)}</span>
+                    <span><button className="secondary compact" type="button" onClick={() => setSelectedSale(sale)}>{t.common.moreInfo}</button></span>
                   </div>
                 ))}
               </div>
@@ -904,60 +979,60 @@ function App() {
             <section className="panel">
               <div className="section-head">
                 <div>
-                  <h3>Create stock movement</h3>
-                  <p className="muted small">Purchases add stock, writeoffs remove it, adjustments correct counted inventory.</p>
+                  <h3>{t.movements.createMovement}</h3>
+                  <p className="muted small">{t.movements.createMovementDescription}</p>
                 </div>
               </div>
               <form className="form-grid compact" onSubmit={handleCreateMovement}>
                 <label>
-                  Product
+                  {t.common.product}
                   <select value={movementForm.product_id} onChange={(event) => setMovementForm((current) => ({ ...current, product_id: event.target.value }))} required>
-                    <option value="">Select a product</option>
-                    {products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku} · stock {product.stock}</option>)}
+                    <option value="">{t.sales.selectProduct}</option>
+                    {products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku} · {t.products.stock.toLowerCase()} {product.stock}</option>)}
                   </select>
                 </label>
                 <label>
-                  Type
+                  {t.common.type}
                   <select value={movementForm.movement_type} onChange={(event) => setMovementForm((current) => ({ ...current, movement_type: event.target.value }))}>
-                    <option value="purchase">Purchase</option>
-                    <option value="adjustment">Adjustment</option>
-                    <option value="writeoff">Writeoff</option>
+                    <option value="purchase">{t.movements.purchase}</option>
+                    <option value="adjustment">{t.movements.adjustment}</option>
+                    <option value="writeoff">{t.movements.writeoff}</option>
                   </select>
                 </label>
                 <label>
-                  Quantity
+                  {t.common.quantity}
                   <input type="number" min="1" value={movementForm.quantity} onChange={(event) => setMovementForm((current) => ({ ...current, quantity: event.target.value }))} required />
                 </label>
                 <label className="span-two">
-                  Note
-                  <input value={movementForm.note} onChange={(event) => setMovementForm((current) => ({ ...current, note: event.target.value }))} placeholder="Why was the stock changed?" />
+                  {t.movements.note}
+                  <input value={movementForm.note} onChange={(event) => setMovementForm((current) => ({ ...current, note: event.target.value }))} placeholder={t.movements.notePlaceholder} />
                 </label>
-                <div className="button-row end span-full"><button type="submit">Save movement</button></div>
+                <div className="button-row end span-full"><button type="submit">{t.movements.saveMovement}</button></div>
               </form>
             </section>
 
             <section className="panel">
               <div className="section-head">
-                <h3>Recent movements</h3>
-                <span className="muted small">Readable table layout with modal details</span>
+                <h3>{t.movements.recentMovements}</h3>
+                <span className="muted small">{t.movements.readableTable}</span>
               </div>
               <div className="list-table">
                 <div className="list-table-head">
-                  <span>Type</span>
-                  <span>Product</span>
-                  <span>Qty</span>
-                  <span>By</span>
-                  <span>Date</span>
-                  <span>Details</span>
+                  <span>{t.common.type}</span>
+                  <span>{t.common.product}</span>
+                  <span>{t.common.quantity}</span>
+                  <span>{t.common.by}</span>
+                  <span>{t.common.date}</span>
+                  <span>{t.common.details}</span>
                 </div>
                 {movements.map((movement) => (
                   <div className="list-table-row" key={movement.id}>
-                    <span><span className={`tag tag-${movement.movement_type}`}>{movement.movement_type}</span></span>
+                    <span><span className={`tag tag-${movement.movement_type}`}>{translateMovementType(movement.movement_type, t)}</span></span>
                     <span className="list-main">{movement.product_name} <small className="muted">{movement.sku}</small></span>
                     <span>{movement.quantity}</span>
                     <span>{movement.created_by_name}</span>
-                    <span>{formatDate(movement.created_at)}</span>
-                    <span><button className="secondary compact" type="button" onClick={() => setSelectedMovement(movement)}>More info</button></span>
+                    <span>{formatDate(movement.created_at, locale)}</span>
+                    <span><button className="secondary compact" type="button" onClick={() => setSelectedMovement(movement)}>{t.common.moreInfo}</button></span>
                   </div>
                 ))}
               </div>
@@ -970,14 +1045,14 @@ function App() {
             <section className="panel">
               <div className="section-head wrap-row">
                 <div>
-                  <h3>Audit logs</h3>
-                  <p className="muted small">Every major action is recorded with actor, timestamp and context.</p>
+                  <h3>{t.logs.title}</h3>
+                  <p className="muted small">{t.logs.description}</p>
                 </div>
                 <div className="control-row wrap">
-                  <input className="search" placeholder="Search action, message or actor" value={logSearch} onChange={(event) => setLogSearch(event.target.value)} />
+                  <input className="search" placeholder={t.logs.searchPlaceholder} value={logSearch} onChange={(event) => setLogSearch(event.target.value)} />
                   <div className="filter-pills">
                     {(['all', 'info', 'warning', 'error'] as LogFilter[]).map((item) => (
-                      <button key={item} className={logFilter === item ? 'pill active' : 'pill'} type="button" onClick={() => setLogFilter(item)}>{item}</button>
+                      <button key={item} className={logFilter === item ? 'pill active' : 'pill'} type="button" onClick={() => setLogFilter(item)}>{item === 'all' ? t.common.all : translateLogLevel(item, t)}</button>
                     ))}
                   </div>
                 </div>
@@ -987,14 +1062,14 @@ function App() {
                   <article className="log-card" key={entry.id}>
                     <div className="log-head">
                       <div className="log-badges">
-                        <span className={`tag tag-${entry.level}`}>{entry.level}</span>
-                        <span className="tag">{humanizeAction(entry.action)}</span>
+                        <span className={`tag tag-${entry.level}`}>{translateLogLevel(entry.level, t)}</span>
+                        <span className="tag">{humanizeAction(entry.action, t)}</span>
                       </div>
-                      <span className="muted small">{formatDate(entry.created_at)}</span>
+                      <span className="muted small">{formatDate(entry.created_at, locale)}</span>
                     </div>
-                    <strong>{entry.message}</strong>
-                    <p className="muted small">{entry.created_by_name} · {entry.entity_type || 'system'}{entry.entity_id ? ` #${entry.entity_id}` : ''}</p>
-                    <p>{detailsToText(entry.details)}</p>
+                    <strong>{translateBackendMessage(entry.message, t)}</strong>
+                    <p className="muted small">{entry.created_by_name} · {entry.entity_type || t.logs.system}{entry.entity_id ? ` #${entry.entity_id}` : ''}</p>
+                    <p>{detailsToText(entry.details, t)}</p>
                   </article>
                 ))}
               </div>
@@ -1008,51 +1083,51 @@ function App() {
               <section className="panel">
                 <div className="section-head">
                   <div>
-                    <h3>My profile</h3>
-                    <p className="muted small">Update personal data visible in the workspace and logs.</p>
+                    <h3>{t.profile.myProfile}</h3>
+                    <p className="muted small">{t.profile.myProfileDescription}</p>
                   </div>
-                  <span className={`status-badge status-${user.status}`}>{user.status.replace('_', ' ')}</span>
+                  <span className={`status-badge status-${user.status}`}>{translateStatus(user.status, t)}</span>
                 </div>
                 <form className="form-grid" onSubmit={handleSaveProfile}>
                   <label>
-                    Full name
+                    {t.profile.fullName}
                     <input value={profileForm.name} onChange={(event) => setProfileForm((current) => ({ ...current, name: event.target.value }))} required />
                   </label>
                   <label>
-                    Email
+                    {t.common.email}
                     <input type="email" value={profileForm.email} onChange={(event) => setProfileForm((current) => ({ ...current, email: event.target.value }))} required />
                   </label>
                   <label>
-                    Phone
+                    {t.common.phone}
                     <input value={profileForm.phone} onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value }))} />
                   </label>
                   <label>
-                    Department
+                    {t.common.department}
                     <input value={profileForm.department} onChange={(event) => setProfileForm((current) => ({ ...current, department: event.target.value }))} required />
                   </label>
                   <label className="span-two">
-                    Title
+                    {t.common.title}
                     <input value={profileForm.title} onChange={(event) => setProfileForm((current) => ({ ...current, title: event.target.value }))} required />
                   </label>
                   <label className="span-full">
-                    Bio
+                    {t.common.bio}
                     <textarea rows={4} value={profileForm.bio} onChange={(event) => setProfileForm((current) => ({ ...current, bio: event.target.value }))} />
                   </label>
-                  <div className="button-row end span-full"><button type="submit">Save profile</button></div>
+                  <div className="button-row end span-full"><button type="submit">{t.profile.saveProfile}</button></div>
                 </form>
               </section>
 
               <section className="panel">
                 <div className="section-head">
-                  <h3>Account summary</h3>
+                  <h3>{t.profile.accountSummary}</h3>
                 </div>
                 <div className="profile-summary">
-                  <div className="summary-row"><span>Role</span><strong>{user.role}</strong></div>
-                  <div className="summary-row"><span>Title</span><strong>{user.title}</strong></div>
-                  <div className="summary-row"><span>Department</span><strong>{user.department}</strong></div>
-                  <div className="summary-row"><span>Hierarchy</span><strong>{user.hierarchy_level}</strong></div>
-                  <div className="summary-row"><span>Manager</span><strong>{user.manager_name || '—'}</strong></div>
-                  <div className="summary-row"><span>Updated</span><strong>{formatDate(user.updated_at)}</strong></div>
+                  <div className="summary-row"><span>{t.common.role}</span><strong>{translateRole(user.role, t)}</strong></div>
+                  <div className="summary-row"><span>{t.common.title}</span><strong>{user.title}</strong></div>
+                  <div className="summary-row"><span>{t.common.department}</span><strong>{user.department}</strong></div>
+                  <div className="summary-row"><span>{t.common.hierarchy}</span><strong>{translateHierarchy(user.hierarchy_level, t)}</strong></div>
+                  <div className="summary-row"><span>{t.common.manager}</span><strong>{user.manager_name || t.common.noManager}</strong></div>
+                  <div className="summary-row"><span>{t.common.updated}</span><strong>{formatDate(user.updated_at, locale)}</strong></div>
                 </div>
               </section>
             </div>
@@ -1062,78 +1137,78 @@ function App() {
                 <section className="panel">
                   <div className="section-head">
                     <div>
-                      <h3>{editingStaffId ? 'Edit staff member' : 'Add staff member'}</h3>
-                      <p className="muted small">Manage hierarchy, role, status and personal information.</p>
+                      <h3>{editingStaffId ? t.profile.editStaffMember : t.profile.addStaffMember}</h3>
+                      <p className="muted small">{t.profile.staffDescription}</p>
                     </div>
-                    {editingStaffId ? <button className="ghost" type="button" onClick={resetStaffForm}>Cancel edit</button> : null}
+                    {editingStaffId ? <button className="ghost" type="button" onClick={resetStaffForm}>{t.common.cancelEdit}</button> : null}
                   </div>
                   <form className="form-grid" onSubmit={handleSaveStaff}>
                     <label>
-                      Full name
+                      {t.profile.fullName}
                       <input value={staffForm.name} onChange={(event) => setStaffForm((current) => ({ ...current, name: event.target.value }))} required />
                     </label>
                     <label>
-                      Email
+                      {t.common.email}
                       <input type="email" value={staffForm.email} onChange={(event) => setStaffForm((current) => ({ ...current, email: event.target.value }))} required />
                     </label>
                     {!editingStaffId ? (
                       <label>
-                        Temporary password
+                        {t.profile.temporaryPassword}
                         <input type="password" value={staffForm.password} onChange={(event) => setStaffForm((current) => ({ ...current, password: event.target.value }))} required />
                       </label>
                     ) : null}
                     <label>
-                      Role
+                      {t.common.role}
                       <select value={staffForm.role} onChange={(event) => setStaffForm((current) => ({ ...current, role: event.target.value as User['role'] }))}>
-                        <option value="employee">Employee</option>
-                        <option value="admin">Admin</option>
+                        <option value="employee">{t.common.employee}</option>
+                        <option value="admin">{t.common.admin}</option>
                       </select>
                     </label>
                     <label>
-                      Status
+                      {t.common.status}
                       <select value={staffForm.status} onChange={(event) => setStaffForm((current) => ({ ...current, status: event.target.value as StaffStatus }))}>
-                        <option value="active">Active</option>
-                        <option value="on_leave">On leave</option>
-                        <option value="inactive">Inactive</option>
+                        <option value="active">{t.common.active}</option>
+                        <option value="on_leave">{t.common.onLeave}</option>
+                        <option value="inactive">{t.common.inactive}</option>
                       </select>
                     </label>
                     <label>
-                      Hierarchy
+                      {t.common.hierarchy}
                       <select value={staffForm.hierarchy_level} onChange={(event) => setStaffForm((current) => ({ ...current, hierarchy_level: event.target.value as StaffLevel }))}>
-                        <option value="staff">Staff</option>
-                        <option value="lead">Lead</option>
-                        <option value="management">Management</option>
+                        <option value="staff">{t.common.staff}</option>
+                        <option value="lead">{t.common.lead}</option>
+                        <option value="management">{t.common.management}</option>
                       </select>
                     </label>
                     <label>
-                      Phone
+                      {t.common.phone}
                       <input value={staffForm.phone} onChange={(event) => setStaffForm((current) => ({ ...current, phone: event.target.value }))} />
                     </label>
                     <label>
-                      Department
+                      {t.common.department}
                       <input value={staffForm.department} onChange={(event) => setStaffForm((current) => ({ ...current, department: event.target.value }))} required />
                     </label>
                     <label>
-                      Title
+                      {t.common.title}
                       <input value={staffForm.title} onChange={(event) => setStaffForm((current) => ({ ...current, title: event.target.value }))} required />
                     </label>
                     <label>
-                      Manager
+                      {t.common.manager}
                       <input value={staffForm.manager_name} onChange={(event) => setStaffForm((current) => ({ ...current, manager_name: event.target.value }))} />
                     </label>
                     <label className="span-full">
-                      Bio
+                      {t.common.bio}
                       <textarea rows={3} value={staffForm.bio} onChange={(event) => setStaffForm((current) => ({ ...current, bio: event.target.value }))} />
                     </label>
-                    <div className="button-row end span-full"><button type="submit">{editingStaffId ? 'Save staff member' : 'Create staff member'}</button></div>
+                    <div className="button-row end span-full"><button type="submit">{editingStaffId ? t.profile.saveStaffMember : t.profile.createStaffMember}</button></div>
                   </form>
                 </section>
 
                 <section className="panel">
                   <div className="section-head wrap-row">
                     <div>
-                      <h3>Personnel</h3>
-                      <p className="muted small">{activeStaff} active of {staff.length} total members</p>
+                      <h3>{t.profile.personnel}</h3>
+                      <p className="muted small">{interpolate(t.profile.personnelSummary, { active: activeStaff, total: staff.length })}</p>
                     </div>
                   </div>
                   <div className="staff-grid">
@@ -1144,16 +1219,16 @@ function App() {
                             <h4>{person.name}</h4>
                             <p className="muted small">{person.email}</p>
                           </div>
-                          <span className={`status-badge status-${person.status}`}>{person.status.replace('_', ' ')}</span>
+                          <span className={`status-badge status-${person.status}`}>{translateStatus(person.status, t)}</span>
                         </div>
                         <div className="staff-meta">
-                          <div><span className="muted small">Role</span><strong>{person.role}</strong></div>
-                          <div><span className="muted small">Title</span><strong>{person.title}</strong></div>
-                          <div><span className="muted small">Department</span><strong>{person.department}</strong></div>
-                          <div><span className="muted small">Hierarchy</span><strong>{person.hierarchy_level}</strong></div>
+                          <div><span className="muted small">{t.common.role}</span><strong>{translateRole(person.role, t)}</strong></div>
+                          <div><span className="muted small">{t.common.title}</span><strong>{person.title}</strong></div>
+                          <div><span className="muted small">{t.common.department}</span><strong>{person.department}</strong></div>
+                          <div><span className="muted small">{t.common.hierarchy}</span><strong>{translateHierarchy(person.hierarchy_level, t)}</strong></div>
                         </div>
-                        <p className="muted small">Manager: {person.manager_name || '—'}</p>
-                        <div className="card-actions"><button className="secondary compact" type="button" onClick={() => startEditStaff(person)}>Edit</button></div>
+                        <p className="muted small">{interpolate(t.profile.managerLabel, { manager: person.manager_name || t.common.noManager })}</p>
+                        <div className="card-actions"><button className="secondary compact" type="button" onClick={() => startEditStaff(person)}>{t.products.edit}</button></div>
                       </article>
                     ))}
                   </div>
@@ -1163,13 +1238,71 @@ function App() {
           </section>
         ) : null}
 
+        {tab === 'settings' ? (
+          <section className="stack-xl">
+            <section className="panel compact-hero">
+              <div>
+                <span className="eyebrow">{t.nav.settings.label}</span>
+                <h3>{t.settings.title}</h3>
+                <p className="muted small">{t.settings.subtitle}</p>
+              </div>
+            </section>
+
+            <div className="split-grid profile-grid">
+              <section className="panel">
+                <div className="section-head">
+                  <div>
+                    <h3>{t.settings.languageSectionTitle}</h3>
+                    <p className="muted small">{t.settings.languageSectionDescription}</p>
+                  </div>
+                </div>
+
+                <div className="stack">
+                  <div className="language-switch-row wrap-row">
+                    {languageOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        className={language === option.value ? 'pill active' : 'pill'}
+                        type="button"
+                        onClick={() => handleLanguageChange(option.value)}
+                      >
+                        {option.nativeLabel}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="callout small-callout">
+                    <strong>{t.settings.currentLanguage}</strong>
+                    <p>{languageOptions.find((option) => option.value === language)?.nativeLabel}</p>
+                    <p className="muted small">{t.settings.persistenceNote}</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="section-head">
+                  <h3>{t.settings.previewTitle}</h3>
+                </div>
+                <div className="profile-summary">
+                  <div className="summary-row"><span>{t.common.language}</span><strong>{languageOptions.find((option) => option.value === language)?.label}</strong></div>
+                  <div className="summary-row"><span>{t.nav.dashboard.label}</span><strong>{t.dashboard.metrics.products.label}</strong></div>
+                  <div className="summary-row"><span>{t.nav.products.label}</span><strong>{t.products.createProductButton}</strong></div>
+                  <div className="summary-row"><span>{t.nav.sales.label}</span><strong>{t.sales.createSaleButton}</strong></div>
+                  <div className="summary-row"><span>{t.nav.movements.label}</span><strong>{t.movements.saveMovement}</strong></div>
+                </div>
+                <p className="muted small">{t.settings.previewDescription}</p>
+              </section>
+            </div>
+          </section>
+        ) : null}
+
         {tab === 'docs' ? (
           <section className="stack-xl">
             <section className="panel compact-hero">
               <div>
-                <span className="eyebrow">Technical documentation</span>
-                <h3>System notes for publication and maintenance</h3>
-                <p className="muted small">The repository includes markdown docs. This screen keeps the essentials available inside the app.</p>
+                <span className="eyebrow">{t.docs.titleEyebrow}</span>
+                <h3>{t.docs.title}</h3>
+                <p className="muted small">{t.docs.description}</p>
               </div>
             </section>
             <div className="docs-grid">
@@ -1187,10 +1320,15 @@ function App() {
       </main>
 
       {selectedSale ? (
-        <Modal title={`Sale #${selectedSale.id}`} subtitle={`${selectedSale.created_by_name} · ${formatDate(selectedSale.created_at)}`} onClose={() => setSelectedSale(null)}>
+        <Modal
+          title={interpolate(t.sales.saleDetailsTitle, { id: selectedSale.id })}
+          subtitle={`${selectedSale.created_by_name} · ${formatDate(selectedSale.created_at, locale)}`}
+          onClose={() => setSelectedSale(null)}
+          closeLabel={t.common.close}
+        >
           <div className="details-card-grid">
-            <div className="summary-row"><span>Total amount</span><strong>{currency(selectedSale.total_amount)}</strong></div>
-            <div className="summary-row"><span>Items</span><strong>{selectedSale.items.length}</strong></div>
+            <div className="summary-row"><span>{t.sales.totalAmount}</span><strong>{currency(selectedSale.total_amount, locale)}</strong></div>
+            <div className="summary-row"><span>{t.common.items}</span><strong>{selectedSale.items.length}</strong></div>
           </div>
           <div className="stack-sm">
             {selectedSale.items.map((item) => (
@@ -1200,8 +1338,8 @@ function App() {
                   <div className="muted small">{item.sku}</div>
                 </div>
                 <div className="align-right">
-                  <div>{item.quantity} × {currency(item.unit_price)}</div>
-                  <strong>{currency(item.quantity * item.unit_price)}</strong>
+                  <div>{item.quantity} × {currency(item.unit_price, locale)}</div>
+                  <strong>{currency(item.quantity * item.unit_price, locale)}</strong>
                 </div>
               </div>
             ))}
@@ -1210,29 +1348,35 @@ function App() {
       ) : null}
 
       {selectedMovement ? (
-        <Modal title={`Movement #${selectedMovement.id}`} subtitle={`${selectedMovement.created_by_name} · ${formatDate(selectedMovement.created_at)}`} onClose={() => setSelectedMovement(null)}>
+        <Modal
+          title={interpolate(t.movements.movementDetailsTitle, { id: selectedMovement.id })}
+          subtitle={`${selectedMovement.created_by_name} · ${formatDate(selectedMovement.created_at, locale)}`}
+          onClose={() => setSelectedMovement(null)}
+          closeLabel={t.common.close}
+        >
           <div className="details-card-grid">
-            <div className="summary-row"><span>Type</span><strong>{selectedMovement.movement_type}</strong></div>
-            <div className="summary-row"><span>Quantity</span><strong>{selectedMovement.quantity}</strong></div>
-            <div className="summary-row"><span>Product</span><strong>{selectedMovement.product_name}</strong></div>
+            <div className="summary-row"><span>{t.common.type}</span><strong>{translateMovementType(selectedMovement.movement_type, t)}</strong></div>
+            <div className="summary-row"><span>{t.common.quantity}</span><strong>{selectedMovement.quantity}</strong></div>
+            <div className="summary-row"><span>{t.common.product}</span><strong>{selectedMovement.product_name}</strong></div>
             <div className="summary-row"><span>SKU</span><strong>{selectedMovement.sku}</strong></div>
           </div>
           <div className="callout small-callout">
-            <strong>Note</strong>
-            <p>{selectedMovement.note || 'No note provided for this movement.'}</p>
+            <strong>{t.movements.note}</strong>
+            <p>{selectedMovement.note || t.common.noNoteProvided}</p>
           </div>
         </Modal>
       ) : null}
 
-      {isProductModalOpen && user.role === 'admin' ? (
+      {isProductModalOpen && user?.role === 'admin' ? (
         <Modal
-          title={editingProductId ? 'Edit product' : 'New product'}
-          subtitle={editingProductId ? 'Update the product fields below and save.' : 'Fill in the product data and create the card.'}
+          title={editingProductId ? t.products.editProduct : t.products.createProduct}
+          subtitle={editingProductId ? t.products.editModalSubtitle : t.products.createModalSubtitle}
           onClose={resetProductForm}
+          closeLabel={t.common.close}
         >
           <form className="form-grid modal-form-grid" onSubmit={handleSubmitProduct}>
             <label>
-              Name
+              {t.common.name}
               <input value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} required />
             </label>
             <label>
@@ -1240,27 +1384,27 @@ function App() {
               <input value={productForm.sku} onChange={(event) => setProductForm((current) => ({ ...current, sku: event.target.value.toUpperCase() }))} required />
             </label>
             <label>
-              Price
+              {t.products.price}
               <input type="number" min="0" step="0.01" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} required />
             </label>
             {!editingProductId ? (
               <label>
-                Initial stock
+                {t.products.initialStock}
                 <input type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))} required />
               </label>
             ) : (
               <div className="callout small-callout">
-                <strong>Stock is updated in Movements</strong>
-                <p className="muted small">Use stock movements when the quantity changes.</p>
+                <strong>{t.products.stockChangesHandled}</strong>
+                <p className="muted small">{t.products.stockChangesDescription}</p>
               </div>
             )}
             <label>
-              Min stock
+              {t.products.minStock}
               <input type="number" min="0" value={productForm.min_stock} onChange={(event) => setProductForm((current) => ({ ...current, min_stock: event.target.value }))} required />
             </label>
             <div className="button-row end span-full modal-actions">
-              <button className="ghost" type="button" onClick={resetProductForm}>Cancel</button>
-              <button type="submit">{editingProductId ? 'Save changes' : 'Create product'}</button>
+              <button className="ghost" type="button" onClick={resetProductForm}>{t.common.cancel}</button>
+              <button type="submit">{editingProductId ? t.products.saveChanges : t.products.createProductButton}</button>
             </div>
           </form>
         </Modal>
@@ -1268,20 +1412,21 @@ function App() {
 
       {productPendingDelete ? (
         <Modal
-          title="Delete product"
-          subtitle={`This will remove ${productPendingDelete.name} from the catalog.`}
+          title={t.products.deleteTitle}
+          subtitle={interpolate(t.products.deleteSubtitle, { name: productPendingDelete.name })}
           onClose={() => setProductPendingDelete(null)}
+          closeLabel={t.common.close}
         >
           <div className="stack">
             <div className="details-card-grid">
-              <div className="callout small-callout"><span className="muted small">Product</span><strong>{productPendingDelete.name}</strong></div>
+              <div className="callout small-callout"><span className="muted small">{t.common.product}</span><strong>{productPendingDelete.name}</strong></div>
               <div className="callout small-callout"><span className="muted small">SKU</span><strong>{productPendingDelete.sku}</strong></div>
-              <div className="callout small-callout"><span className="muted small">Stock</span><strong>{productPendingDelete.stock}</strong></div>
-              <div className="callout small-callout"><span className="muted small">Updated</span><strong>{formatDate(productPendingDelete.updated_at)}</strong></div>
+              <div className="callout small-callout"><span className="muted small">{t.products.stock}</span><strong>{productPendingDelete.stock}</strong></div>
+              <div className="callout small-callout"><span className="muted small">{t.common.updated}</span><strong>{formatDate(productPendingDelete.updated_at, locale)}</strong></div>
             </div>
             <div className="button-row end modal-actions">
-              <button className="ghost" type="button" onClick={() => setProductPendingDelete(null)}>Cancel</button>
-              <button className="ghost danger" type="button" onClick={() => void handleDeleteProduct(productPendingDelete)}>Delete</button>
+              <button className="ghost" type="button" onClick={() => setProductPendingDelete(null)}>{t.common.cancel}</button>
+              <button className="ghost danger" type="button" onClick={() => void handleDeleteProduct(productPendingDelete)}>{t.products.delete}</button>
             </div>
           </div>
         </Modal>
