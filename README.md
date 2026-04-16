@@ -2,15 +2,15 @@
 
 Portfolio-ready full-stack demo for inventory, warehouse operations and sales.
 
-StockFlow is designed to look credible in a recruiter review: it is not just a CRUD toy. The project includes authentication, role-based access, inventory adjustments, multi-item sales, analytics, Docker setup, CI, PostgreSQL support and deployment configs for Render + Vercel.
+StockFlow is designed to look credible in a recruiter review: it is not just a CRUD toy. The project includes authentication, role-based access, inventory adjustments, multi-item sales, analytics, audit logs, technical documentation, responsive UI, Docker setup, CI, PostgreSQL support and deployment configs for Vercel / Render-style workflows.
 
 ## Live demo
 
 > Add your real links after the first deploy:
 >
 > - Frontend demo: `https://YOUR-FRONTEND.vercel.app`
-> - API base URL: `https://YOUR-API.onrender.com/api`
-> - API docs: `https://YOUR-API.onrender.com/docs`
+> - API base URL: `https://YOUR-BACKEND.vercel.app/api`
+> - API docs: `https://YOUR-BACKEND.vercel.app/docs`
 
 ## Highlights
 
@@ -20,10 +20,12 @@ StockFlow is designed to look credible in a recruiter review: it is not just a C
 - Stock movements: `purchase`, `writeoff`, `adjustment`, `sale`
 - Multi-item sales with automatic stock deduction
 - Dashboard with revenue trend, top products and low-stock watchlist
+- Audit logs stored in the database and visible in the UI
+- Technical documentation in `docs/`
+- Responsive layout with collapsible sidebar and mobile burger menu
 - Seeded demo data for a stronger first impression
 - Docker Compose with PostgreSQL
-- Render Blueprint for backend + managed Postgres
-- Vercel config for the frontend
+- Vercel / PostgreSQL-ready environment configuration
 - GitHub Actions for backend tests and frontend build
 
 ## Tech stack
@@ -32,7 +34,7 @@ StockFlow is designed to look credible in a recruiter review: it is not just a C
 - **Backend:** FastAPI + SQLAlchemy
 - **Database:** PostgreSQL (production) / SQLite (test fallback)
 - **Auth:** JWT
-- **Infra:** Docker + Docker Compose + Render + Vercel
+- **Infra:** Docker + Docker Compose + Vercel-ready setup
 - **CI:** GitHub Actions
 
 ## Demo accounts
@@ -48,10 +50,11 @@ Seed data is created automatically on first startup.
 
 ## What the demo contains
 
-- 6 seeded products
+- enriched seeded product catalog
 - seeded sales history across several days
 - seeded warehouse movements
 - low-stock and out-of-stock examples for dashboard widgets
+- audit log entries for sign-ins and write operations
 
 ## Quick start
 
@@ -109,33 +112,17 @@ npm run dev
 
 ## Deploy
 
-### Backend + database on Render
+### Backend
 
-This repo already contains `render.yaml`.
+Set these environment variables:
 
-What it does:
+```bash
+DATABASE_URL=postgresql+psycopg://...
+JWT_SECRET=change-me
+CORS_ORIGINS=https://YOUR-FRONTEND.vercel.app
+```
 
-- provisions a managed PostgreSQL database
-- deploys the FastAPI backend as a Render web service
-- injects `DATABASE_URL` automatically from the Render database
-- generates `JWT_SECRET`
-- uses `/api/health` as the health check path
-
-Steps:
-
-1. Push this repo to GitHub.
-2. In Render, create a new **Blueprint** deployment from the repo.
-3. Render will detect `render.yaml` and provision:
-   - `stockflow-db`
-   - `stockflow-api`
-4. In the backend service, set `CORS_ORIGINS` to your future Vercel URL, for example:
-   - `https://your-frontend.vercel.app`
-5. After deploy, copy your backend URL, for example:
-   - `https://stockflow-api.onrender.com`
-
-### Frontend on Vercel
-
-The frontend already contains `frontend/vercel.json`.
+### Frontend
 
 Suggested Vercel settings:
 
@@ -144,21 +131,15 @@ Suggested Vercel settings:
 - **Build Command:** `npm run build`
 - **Output Directory:** `dist`
 - **Environment Variable:**
-  - `VITE_API_URL=https://YOUR-API.onrender.com/api`
-
-After deploy, you will get a URL like:
-
-- `https://stockflow-demo.vercel.app`
+  - `VITE_API_URL=https://YOUR-BACKEND.vercel.app/api`
 
 ### Final production wiring
 
-After both services are live:
-
-1. Copy the Vercel frontend URL.
-2. Put that URL into Render backend env var:
-   - `CORS_ORIGINS=https://YOUR-FRONTEND.vercel.app`
-3. Redeploy the backend.
-4. Update the **Live demo** section at the top of this README with your real links.
+1. Deploy the backend.
+2. Deploy the frontend.
+3. Set backend `CORS_ORIGINS` to the exact frontend domain.
+4. Redeploy backend.
+5. Update the **Live demo** section in this README.
 
 ## Project structure
 
@@ -168,12 +149,16 @@ stockflow/
 │   ├── app/
 │   │   ├── auth.py
 │   │   ├── db.py
+│   │   ├── index.py
 │   │   ├── main.py
 │   │   └── security.py
 │   ├── tests/
 │   │   └── test_api_smoke.py
 │   ├── Dockerfile
 │   └── requirements.txt
+├── docs/
+│   ├── DEPLOYMENT_NOTES.md
+│   └── TECHNICAL_DOCUMENTATION.md
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx
@@ -188,7 +173,6 @@ stockflow/
 ├── .env.example
 ├── .gitignore
 ├── docker-compose.yml
-├── render.yaml
 └── README.md
 ```
 
@@ -196,16 +180,17 @@ stockflow/
 
 ### Admin
 
-- create and edit products
-- delete products without sales history
+- create, edit and delete products
 - manage stock movements
-- see dashboard analytics
+- sync demo data
+- inspect audit logs
+- review dashboard analytics
 
 ### Employee
 
 - sign in
 - create sales
-- view catalog, sales and movements
+- view catalog, sales, movements and logs
 
 ## API examples
 
@@ -237,29 +222,3 @@ Authorization: Bearer <token>
   ]
 }
 ```
-
-## Why this is a strong portfolio project
-
-This repository shows more than syntax knowledge:
-
-- a realistic business domain
-- access control and authentication
-- state changes with side effects
-- analytics from transactional data
-- PostgreSQL-ready production configuration
-- Dockerized local environment
-- automated checks in CI
-- cloud deployment path with Render and Vercel
-
-## Suggested next commits
-
-- add Alembic migrations
-- add audit log / soft delete
-- add CSV export
-- add e2e tests
-- add charts library with richer analytics
-- add optimistic UI updates
-
-## License
-
-MIT

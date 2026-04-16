@@ -85,3 +85,15 @@ export type Sale = {
   created_by_name: string
   items: SaleItem[]
 }
+
+export type AuditLog = {
+  id: number
+  level: 'info' | 'warning' | 'error' | string
+  action: string
+  entity_type: string | null
+  entity_id: number | null
+  message: string
+  details: Record<string, unknown>
+  created_at: string
+  created_by_name: string
+}

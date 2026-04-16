@@ -37,8 +37,8 @@ def test_dashboard_seed_data() -> None:
         assert response.status_code == 200
 
         data = response.json()
-        assert data['total_products'] >= 6
-        assert data['total_sales_count'] >= 6
+        assert data['total_products'] >= 14
+        assert data['total_sales_count'] >= 16
         assert len(data['top_products']) >= 1
         assert len(data['revenue_by_day']) >= 1
 
@@ -110,3 +110,28 @@ def test_sale_rejects_duplicate_products() -> None:
         )
         assert response.status_code == 400
         assert 'duplicate' in response.json()['detail'].lower()
+
+
+def test_demo_populate_endpoint_is_idempotent() -> None:
+    with TestClient(app) as client:
+        token = login(client, 'admin@stockflow.app', 'Admin123!')
+        headers = {'Authorization': f'Bearer {token}'}
+
+        response = client.post('/api/demo/populate', headers=headers)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data['totals']['products'] >= 14
+        assert data['totals']['sales'] >= 16
+        assert data['totals']['movements'] >= 40
+
+
+def test_logs_endpoint_returns_audit_trail() -> None:
+    with TestClient(app) as client:
+        token = login(client, 'admin@stockflow.app', 'Admin123!')
+        response = client.get('/api/logs', headers={'Authorization': f'Bearer {token}'})
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] >= 1
+        assert len(data['items']) >= 1
+        assert 'action' in data['items'][0]

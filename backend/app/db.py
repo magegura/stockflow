@@ -1,14 +1,17 @@
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, create_engine, event, func, select, text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from .security import hash_password
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+PORTFOLIO_MARKER_SKU = "NB-014"
 
 
 class Base(DeclarativeBase):
@@ -74,6 +77,20 @@ class SaleItem(Base):
     sale: Mapped[Sale] = relationship(back_populates="items")
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="info")
+    action: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message: Mapped[str] = mapped_column(String(255), nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 _engine = None
 _SessionLocal = None
 
@@ -101,6 +118,7 @@ def get_engine():
     _engine = create_engine(database_url, future=True, pool_pre_ping=True, connect_args=connect_args)
 
     if database_url.startswith("sqlite"):
+
         @event.listens_for(_engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _connection_record):
             cursor = dbapi_connection.cursor()
@@ -131,6 +149,42 @@ def to_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def parse_details(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def create_audit_log(
+    db: Session,
+    *,
+    action: str,
+    message: str,
+    level: str = "info",
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+    created_by: int | None = None,
+    details: dict[str, Any] | None = None,
+    created_at: datetime | None = None,
+) -> AuditLog:
+    row = AuditLog(
+        level=level,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        message=message,
+        details_json=json.dumps(details or {}, ensure_ascii=False),
+        created_by=created_by,
+        created_at=created_at or now_utc(),
+    )
+    db.add(row)
+    return row
+
+
 def get_db():
     db = get_session_factory()()
     try:
@@ -146,6 +200,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with get_session_factory()() as db:
         seed_db(db)
+        ensure_portfolio_demo_data(db)
 
 
 def seed_db(db: Session) -> None:
@@ -184,15 +239,15 @@ def seed_db(db: Session) -> None:
     db.flush()
 
     for product in products:
-        db.add(
-            StockMovement(
-                product_id=product.id,
-                movement_type="purchase",
-                quantity=product.stock,
-                note="Initial seed stock",
-                created_by=admin.id,
-                created_at=created_at,
-            )
+        create_stock_movement_record(
+            db,
+            product=product,
+            movement_type="purchase",
+            quantity=product.stock,
+            note="Initial seed stock",
+            created_by=admin.id,
+            created_at=created_at,
+            apply_stock_delta=False,
         )
 
     sales_seed = [
@@ -205,61 +260,210 @@ def seed_db(db: Session) -> None:
     ]
 
     for sale_created_at, created_by, items in sales_seed:
-        total_amount = round(sum(product.price * quantity for product, quantity in items), 2)
-        sale = Sale(total_amount=total_amount, created_by=created_by, created_at=sale_created_at)
-        db.add(sale)
-        db.flush()
-
-        for product, quantity in items:
-            product.stock -= quantity
-            product.updated_at = sale_created_at
-            db.add(
-                SaleItem(
-                    sale_id=sale.id,
-                    product_id=product.id,
-                    quantity=quantity,
-                    unit_price=product.price,
-                )
-            )
-            db.add(
-                StockMovement(
-                    product_id=product.id,
-                    movement_type="sale",
-                    quantity=quantity,
-                    note=f"Sale #{sale.id}",
-                    created_by=created_by,
-                    created_at=sale_created_at,
-                )
-            )
+        create_sale_record(db, created_at=sale_created_at, created_by=created_by, items=items)
 
     writeoff_at = datetime(2026, 4, 15, 9, 30, 0, tzinfo=timezone.utc)
-    products[5].stock = max(products[5].stock - 1, 0)
-    products[5].updated_at = writeoff_at
-    db.add(
-        StockMovement(
-            product_id=products[5].id,
-            movement_type="writeoff",
-            quantity=1,
-            note="Damaged item during seed import",
-            created_by=admin.id,
-            created_at=writeoff_at,
-        )
+    create_stock_movement_record(
+        db,
+        product=products[5],
+        movement_type="writeoff",
+        quantity=1,
+        note="Damaged item during seed import",
+        created_by=admin.id,
+        created_at=writeoff_at,
+    )
+
+    create_audit_log(
+        db,
+        action="seed.initialized",
+        message="Initial demo users, products and sample transactions created",
+        entity_type="system",
+        created_by=admin.id,
+        created_at=created_at,
+        details={"users": 2, "products": len(products), "sales": len(sales_seed)},
     )
 
     db.commit()
 
 
+def ensure_portfolio_demo_data(db: Session) -> bool:
+    admin = db.scalar(select(User).where(User.email == "admin@stockflow.app"))
+    employee = db.scalar(select(User).where(User.email == "employee@stockflow.app"))
+    if not admin or not employee:
+        return False
+
+    already_enriched = db.scalar(select(Product.id).where(Product.sku == PORTFOLIO_MARKER_SKU))
+    if already_enriched:
+        return False
+
+    created_at = datetime(2026, 4, 16, 9, 0, 0, tzinfo=timezone.utc)
+    catalog = {product.sku: product for product in db.scalars(select(Product)).all()}
+
+    extra_products = [
+        {"name": "Noise Cancelling Headphones", "sku": "HD-007", "price": 129.0, "stock": 18, "min_stock": 4},
+        {"name": '4K Monitor 27"', "sku": "MN-008", "price": 299.0, "stock": 7, "min_stock": 2},
+        {"name": "Portable SSD 1TB", "sku": "PS-009", "price": 109.0, "stock": 14, "min_stock": 4},
+        {"name": "Wireless Charger", "sku": "WC-010", "price": 34.0, "stock": 22, "min_stock": 6},
+        {"name": "Ergonomic Chair", "sku": "EC-011", "price": 249.0, "stock": 5, "min_stock": 2},
+        {"name": "USB Hub 7-in-1", "sku": "UH-012", "price": 49.0, "stock": 15, "min_stock": 5},
+        {"name": "Conference Speaker", "sku": "CS-013", "price": 89.0, "stock": 6, "min_stock": 2},
+        {"name": "Notebook Set", "sku": PORTFOLIO_MARKER_SKU, "price": 16.0, "stock": 40, "min_stock": 12},
+    ]
+
+    for item in extra_products:
+        product = Product(
+            name=item["name"],
+            sku=item["sku"],
+            price=item["price"],
+            stock=item["stock"],
+            min_stock=item["min_stock"],
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(product)
+        db.flush()
+        catalog[product.sku] = product
+        create_stock_movement_record(
+            db,
+            product=product,
+            movement_type="purchase",
+            quantity=item["stock"],
+            note="Portfolio demo opening stock",
+            created_by=admin.id,
+            created_at=created_at,
+            apply_stock_delta=False,
+        )
+
+    movement_plan = [
+        ("DL-006", "purchase", 12, "Weekly supplier restock", admin.id, datetime(2026, 4, 16, 10, 0, 0, tzinfo=timezone.utc)),
+        ("WM-001", "purchase", 8, "Top seller replenishment", admin.id, datetime(2026, 4, 16, 11, 0, 0, tzinfo=timezone.utc)),
+        ("WC-005", "adjustment", 2, "Cycle count correction after shelf audit", employee.id, datetime(2026, 4, 17, 9, 20, 0, tzinfo=timezone.utc)),
+        ("MK-002", "writeoff", 1, "Returned damaged unit", admin.id, datetime(2026, 4, 17, 16, 45, 0, tzinfo=timezone.utc)),
+        ("MN-008", "purchase", 3, "Display order received from supplier", admin.id, datetime(2026, 4, 18, 9, 5, 0, tzinfo=timezone.utc)),
+        ("CS-013", "adjustment", 1, "Manual recount before showroom refresh", employee.id, datetime(2026, 4, 18, 14, 10, 0, tzinfo=timezone.utc)),
+    ]
+
+    for sku, movement_type, quantity, note, created_by, movement_at in movement_plan:
+        create_stock_movement_record(
+            db,
+            product=catalog[sku],
+            movement_type=movement_type,
+            quantity=quantity,
+            note=note,
+            created_by=created_by,
+            created_at=movement_at,
+        )
+
+    sales_plan = [
+        (datetime(2026, 4, 16, 13, 15, 0, tzinfo=timezone.utc), employee.id, [(catalog["WM-001"], 2), (catalog["UH-012"], 2), (catalog[PORTFOLIO_MARKER_SKU], 5)]),
+        (datetime(2026, 4, 17, 12, 5, 0, tzinfo=timezone.utc), admin.id, [(catalog["HD-007"], 1), (catalog["PS-009"], 2), (catalog["WC-010"], 3)]),
+        (datetime(2026, 4, 18, 17, 30, 0, tzinfo=timezone.utc), employee.id, [(catalog["MN-008"], 1), (catalog["EC-011"], 1), (catalog["UH-012"], 1)]),
+        (datetime(2026, 4, 19, 11, 40, 0, tzinfo=timezone.utc), admin.id, [(catalog["WC-005"], 1), (catalog["DL-006"], 2), (catalog[PORTFOLIO_MARKER_SKU], 6)]),
+        (datetime(2026, 4, 20, 15, 10, 0, tzinfo=timezone.utc), employee.id, [(catalog["MK-002"], 1), (catalog["UC-003"], 4), (catalog["WC-010"], 2)]),
+        (datetime(2026, 4, 21, 9, 50, 0, tzinfo=timezone.utc), employee.id, [(catalog["HD-007"], 2), (catalog["PS-009"], 1), (catalog[PORTFOLIO_MARKER_SKU], 4), (catalog["UH-012"], 3)]),
+        (datetime(2026, 4, 22, 13, 35, 0, tzinfo=timezone.utc), admin.id, [(catalog["MN-008"], 2), (catalog["CS-013"], 1), (catalog["WM-001"], 3)]),
+        (datetime(2026, 4, 23, 16, 25, 0, tzinfo=timezone.utc), employee.id, [(catalog["DL-006"], 3), (catalog["UC-003"], 5), (catalog["WC-010"], 4), (catalog[PORTFOLIO_MARKER_SKU], 8)]),
+        (datetime(2026, 4, 24, 14, 45, 0, tzinfo=timezone.utc), admin.id, [(catalog["PS-009"], 2), (catalog["HD-007"], 1), (catalog["EC-011"], 1)]),
+        (datetime(2026, 4, 25, 10, 10, 0, tzinfo=timezone.utc), employee.id, [(catalog["WM-001"], 2), (catalog["CS-013"], 2), (catalog["UH-012"], 2)]),
+    ]
+
+    for sale_created_at, created_by, items in sales_plan:
+        create_sale_record(db, created_at=sale_created_at, created_by=created_by, items=items)
+
+    create_audit_log(
+        db,
+        action="demo.enriched",
+        message="Portfolio-grade demo dataset synchronized",
+        entity_type="system",
+        created_by=admin.id,
+        created_at=created_at,
+        details={"new_products": len(extra_products), "new_sales": len(sales_plan), "new_movements": len(movement_plan)},
+    )
+
+    db.commit()
+    return True
+
+
+def create_stock_movement_record(
+    db: Session,
+    *,
+    product: Product,
+    movement_type: str,
+    quantity: int,
+    note: str | None,
+    created_by: int,
+    created_at: datetime,
+    apply_stock_delta: bool = True,
+) -> None:
+    if apply_stock_delta:
+        delta = quantity if movement_type in {"purchase", "adjustment"} else -quantity
+        product.stock = max(product.stock + delta, 0)
+        product.updated_at = created_at
+
+    db.add(
+        StockMovement(
+            product_id=product.id,
+            movement_type=movement_type,
+            quantity=quantity,
+            note=note,
+            created_by=created_by,
+            created_at=created_at,
+        )
+    )
+
+
+def create_sale_record(
+    db: Session,
+    *,
+    created_at: datetime,
+    created_by: int,
+    items: list[tuple[Product, int]],
+) -> Sale:
+    total_amount = round(sum(product.price * quantity for product, quantity in items), 2)
+    sale = Sale(total_amount=total_amount, created_by=created_by, created_at=created_at)
+    db.add(sale)
+    db.flush()
+
+    for product, quantity in items:
+        product.stock -= quantity
+        product.updated_at = created_at
+        db.add(
+            SaleItem(
+                sale_id=sale.id,
+                product_id=product.id,
+                quantity=quantity,
+                unit_price=product.price,
+            )
+        )
+        db.add(
+            StockMovement(
+                product_id=product.id,
+                movement_type="sale",
+                quantity=quantity,
+                note=f"Sale #{sale.id}",
+                created_by=created_by,
+                created_at=created_at,
+            )
+        )
+
+    return sale
+
+
 __all__ = [
+    "AuditLog",
     "Product",
     "Sale",
     "SaleItem",
     "SessionLocal",
     "StockMovement",
     "User",
+    "create_audit_log",
+    "ensure_portfolio_demo_data",
     "get_db",
     "get_engine",
     "get_session_factory",
     "init_db",
     "now_utc",
+    "parse_details",
     "to_iso",
 ]

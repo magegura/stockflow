@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -10,20 +11,39 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user, require_roles
-from .db import Product, Sale, SaleItem, StockMovement, User, get_db, init_db, now_utc, to_iso
+from .db import (
+    AuditLog,
+    Product,
+    Sale,
+    SaleItem,
+    StockMovement,
+    User,
+    create_audit_log,
+    ensure_portfolio_demo_data,
+    get_db,
+    init_db,
+    now_utc,
+    parse_details,
+    to_iso,
+)
 from .security import create_access_token, verify_password
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("stockflow.api")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    logger.info("StockFlow API initialized")
     yield
 
 
 app = FastAPI(
     title="StockFlow API",
-    version="2.0.0",
-    description="Portfolio-ready inventory and sales backend with auth, roles and business workflows.",
+    version="3.0.0",
+    description="Portfolio-ready inventory and sales backend with auth, logs, documentation hooks and business workflows.",
     lifespan=lifespan,
 )
 
@@ -101,6 +121,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
         "created_at": to_iso(row.created_at),
     }
     token = create_access_token({"user_id": row.id, "role": row.role})
+
+    create_audit_log(
+        db,
+        action="auth.login",
+        message=f"{row.name} signed in",
+        entity_type="user",
+        entity_id=row.id,
+        created_by=row.id,
+        details={"email": row.email, "role": row.role},
+    )
+    db.commit()
+    logger.info("User logged in: %s", row.email)
+
     return {"access_token": token, "user": user}
 
 
@@ -146,14 +179,20 @@ def dashboard(db: Session = Depends(get_db), user: dict = Depends(get_current_us
         .limit(5)
     ).all()
 
-    revenue_by_day = db.execute(
+    revenue_by_day_subquery = (
         select(
             func.date(Sale.created_at).label("day"),
             func.round(func.sum(Sale.total_amount), 2).label("revenue"),
         )
         .group_by(func.date(Sale.created_at))
-        .order_by(text("day ASC"))
+        .order_by(text("day DESC"))
         .limit(7)
+        .subquery()
+    )
+
+    revenue_by_day = db.execute(
+        select(revenue_by_day_subquery.c.day, revenue_by_day_subquery.c.revenue)
+        .order_by(revenue_by_day_subquery.c.day.asc())
     ).all()
 
     return {
@@ -187,6 +226,40 @@ def dashboard(db: Session = Depends(get_db), user: dict = Depends(get_current_us
             {"day": str(row.day), "revenue": float(row.revenue or 0)} for row in revenue_by_day
         ],
         "viewer": user,
+    }
+
+
+@app.post("/api/demo/populate")
+def populate_demo_data(
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_roles("admin")),
+) -> dict:
+    changed = ensure_portfolio_demo_data(db)
+    total_products = db.scalar(select(func.count(Product.id))) or 0
+    total_sales = db.scalar(select(func.count(Sale.id))) or 0
+    total_movements = db.scalar(select(func.count(StockMovement.id))) or 0
+    total_logs = db.scalar(select(func.count(AuditLog.id))) or 0
+
+    create_audit_log(
+        db,
+        action="demo.populate",
+        message="Demo data synchronization requested",
+        entity_type="system",
+        created_by=user["id"],
+        details={"changed": changed, "products": total_products, "sales": total_sales, "movements": total_movements},
+    )
+    db.commit()
+
+    return {
+        "message": "Demo data generated" if changed else "Demo data already up to date",
+        "changed": changed,
+        "totals": {
+            "products": total_products,
+            "sales": total_sales,
+            "movements": total_movements,
+            "logs": total_logs,
+        },
+        "requested_by": user["email"],
     }
 
 
@@ -261,11 +334,22 @@ def create_product(
                     created_at=timestamp,
                 )
             )
+        create_audit_log(
+            db,
+            action="product.created",
+            message=f"Product {product.name} created",
+            entity_type="product",
+            entity_id=product.id,
+            created_by=user["id"],
+            details={"sku": product.sku, "price": payload.price, "stock": payload.stock, "min_stock": payload.min_stock},
+            created_at=timestamp,
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail="SKU must be unique") from exc
 
+    logger.info("Product created by %s: %s", user["email"], product.sku)
     return {"message": "Product created", "product_id": product.id}
 
 
@@ -281,6 +365,7 @@ def update_product(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    previous = {"name": product.name, "sku": product.sku, "price": product.price, "min_stock": product.min_stock}
     product.name = payload.name.strip()
     product.sku = payload.sku.strip().upper()
     product.price = payload.price
@@ -288,11 +373,22 @@ def update_product(
     product.updated_at = timestamp
 
     try:
+        create_audit_log(
+            db,
+            action="product.updated",
+            message=f"Product {product.name} updated",
+            entity_type="product",
+            entity_id=product.id,
+            created_by=user["id"],
+            details={"before": previous, "after": {"name": product.name, "sku": product.sku, "price": product.price, "min_stock": product.min_stock}},
+            created_at=timestamp,
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail="SKU must be unique") from exc
 
+    logger.info("Product updated by %s: #%s", user["email"], product.id)
     return {"message": "Product updated"}
 
 
@@ -313,8 +409,19 @@ def delete_product(
             detail="Product cannot be deleted because it already has sales history",
         )
 
+    snapshot = {"name": product.name, "sku": product.sku, "stock": product.stock, "price": product.price}
+    create_audit_log(
+        db,
+        action="product.deleted",
+        message=f"Product {product.name} deleted",
+        entity_type="product",
+        entity_id=product.id,
+        created_by=user["id"],
+        details=snapshot,
+    )
     db.delete(product)
     db.commit()
+    logger.info("Product deleted by %s: #%s", user["email"], product_id)
     return {"message": "Product deleted"}
 
 
@@ -334,6 +441,7 @@ def create_stock_movement(
     if new_stock < 0:
         raise HTTPException(status_code=400, detail="Not enough stock")
 
+    previous_stock = product.stock
     product.stock = new_stock
     product.updated_at = timestamp
     db.add(
@@ -346,8 +454,19 @@ def create_stock_movement(
             created_at=timestamp,
         )
     )
+    create_audit_log(
+        db,
+        action="stock.movement_created",
+        message=f"{payload.movement_type.title()} recorded for {product.name}",
+        entity_type="stock_movement",
+        entity_id=product.id,
+        created_by=user["id"],
+        details={"sku": product.sku, "quantity": payload.quantity, "movement_type": payload.movement_type, "stock_before": previous_stock, "stock_after": new_stock, "note": payload.note},
+        created_at=timestamp,
+    )
     db.commit()
 
+    logger.info("Stock movement by %s: product=%s type=%s qty=%s", user["email"], product.sku, payload.movement_type, payload.quantity)
     return {"message": "Stock movement created", "new_stock": new_stock}
 
 
@@ -442,6 +561,7 @@ def create_sale(
     db.add(sale)
     db.flush()
 
+    line_items_summary = []
     for item in prepared_items:
         product: Product = item["product"]
         product.stock -= item["quantity"]
@@ -464,8 +584,21 @@ def create_sale(
                 created_at=timestamp,
             )
         )
+        line_items_summary.append({"product_id": product.id, "sku": product.sku, "quantity": item["quantity"], "unit_price": item["unit_price"]})
+
+    create_audit_log(
+        db,
+        action="sale.created",
+        message=f"Sale #{sale.id} created",
+        entity_type="sale",
+        entity_id=sale.id,
+        created_by=user["id"],
+        details={"total_amount": round(total_amount, 2), "items": line_items_summary},
+        created_at=timestamp,
+    )
 
     db.commit()
+    logger.info("Sale created by %s: sale_id=%s total=%s", user["email"], sale.id, round(total_amount, 2))
     return {"message": "Sale created", "sale_id": sale.id, "total_amount": round(total_amount, 2)}
 
 
@@ -527,3 +660,69 @@ def list_sales(
         )
 
     return {"items": result, "page": page, "page_size": page_size, "total": total}
+
+
+@app.get("/api/logs")
+def list_logs(
+    level: str = Query(default="all"),
+    search: str = Query(default=""),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    offset = (page - 1) * page_size
+    query = (
+        select(
+            AuditLog.id,
+            AuditLog.level,
+            AuditLog.action,
+            AuditLog.entity_type,
+            AuditLog.entity_id,
+            AuditLog.message,
+            AuditLog.details_json,
+            AuditLog.created_at,
+            User.name.label("created_by_name"),
+        )
+        .select_from(AuditLog)
+        .join(User, User.id == AuditLog.created_by, isouter=True)
+    )
+
+    count_query = select(func.count(AuditLog.id))
+
+    if level != "all":
+        query = query.where(AuditLog.level == level)
+        count_query = count_query.where(AuditLog.level == level)
+
+    if search.strip():
+        term = f"%{search.strip().lower()}%"
+        search_filter = or_(
+            func.lower(AuditLog.action).like(term),
+            func.lower(AuditLog.message).like(term),
+            func.lower(func.coalesce(AuditLog.entity_type, "")).like(term),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    total = db.scalar(count_query) or 0
+    rows = db.execute(query.order_by(AuditLog.id.desc()).offset(offset).limit(page_size)).all()
+
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "level": row.level,
+                "action": row.action,
+                "entity_type": row.entity_type,
+                "entity_id": row.entity_id,
+                "message": row.message,
+                "details": parse_details(row.details_json),
+                "created_at": to_iso(row.created_at),
+                "created_by_name": row.created_by_name or "System",
+            }
+            for row in rows
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
