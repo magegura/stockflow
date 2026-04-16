@@ -17,9 +17,10 @@ StockFlow is designed to look credible in a recruiter review: it is not just a C
 - JWT authentication
 - Roles: `admin` and `employee`
 - Product management with create, edit and delete flows
+- Personnel profiles with admin staff management and employee self-service updates
 - Stock movements: `purchase`, `writeoff`, `adjustment`, `sale`
 - Multi-item sales with automatic stock deduction
-- Dashboard with revenue trend, top products and low-stock watchlist
+- Compact dashboard with revenue trend, top products and low-stock watchlist
 - Audit logs stored in the database and visible in the UI
 - Technical documentation in `docs/`
 - Responsive layout with collapsible sidebar and mobile burger menu
@@ -32,7 +33,7 @@ StockFlow is designed to look credible in a recruiter review: it is not just a C
 
 - **Frontend:** React + TypeScript + Vite
 - **Backend:** FastAPI + SQLAlchemy
-- **Database:** PostgreSQL (production) / SQLite (test fallback)
+- **Database:** PostgreSQL (production) / SQLite (tests and local fallback)
 - **Auth:** JWT
 - **Infra:** Docker + Docker Compose + Vercel-ready setup
 - **CI:** GitHub Actions
@@ -53,6 +54,7 @@ Seed data is created automatically on first startup.
 - enriched seeded product catalog
 - seeded sales history across several days
 - seeded warehouse movements
+- seeded staff directory with roles, titles, statuses and hierarchy
 - low-stock and out-of-stock examples for dashboard widgets
 - audit log entries for sign-ins and write operations
 
@@ -182,6 +184,7 @@ stockflow/
 
 - create, edit and delete products
 - manage stock movements
+- manage staff directory, roles, titles and statuses
 - sync demo data
 - inspect audit logs
 - review dashboard analytics
@@ -189,6 +192,7 @@ stockflow/
 ### Employee
 
 - sign in
+- update personal profile information
 - create sales
 - view catalog, sales, movements and logs
 

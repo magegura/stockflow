@@ -135,3 +135,47 @@ def test_logs_endpoint_returns_audit_trail() -> None:
         assert data['total'] >= 1
         assert len(data['items']) >= 1
         assert 'action' in data['items'][0]
+
+
+def test_profile_and_staff_management() -> None:
+    with TestClient(app) as client:
+        admin_token = login(client, 'admin@stockflow.app', 'Admin123!')
+        headers = {'Authorization': f'Bearer {admin_token}'}
+
+        profile_response = client.put(
+            '/api/profile',
+            headers=headers,
+            json={
+                'name': 'Admin',
+                'email': 'admin@stockflow.app',
+                'phone': '+54 11 4000 0000',
+                'department': 'Operations',
+                'title': 'Platform Administrator',
+                'bio': 'Maintains the main workspace.',
+            },
+        )
+        assert profile_response.status_code == 200
+        assert profile_response.json()['user']['title'] == 'Platform Administrator'
+
+        create_user_response = client.post(
+            '/api/users',
+            headers=headers,
+            json={
+                'name': 'Test Person',
+                'email': 'test.person@stockflow.app',
+                'password': 'TempPass123!',
+                'role': 'employee',
+                'phone': '+54 11 1234 5678',
+                'department': 'Support',
+                'title': 'Support Agent',
+                'status': 'active',
+                'hierarchy_level': 'staff',
+                'manager_name': 'Admin',
+                'bio': 'Created from smoke test',
+            },
+        )
+        assert create_user_response.status_code == 200
+
+        users_response = client.get('/api/users', headers=headers)
+        assert users_response.status_code == 200
+        assert any(item['email'] == 'test.person@stockflow.app' for item in users_response.json()['items'])

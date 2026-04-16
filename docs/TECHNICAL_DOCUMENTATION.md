@@ -25,6 +25,7 @@ StockFlow is a portfolio-ready inventory and sales management demo designed to p
 
 ## Core entities
 - **User** — authenticated operator
+- **EmployeeProfile** — staff metadata such as title, department, status and hierarchy
 - **Product** — catalog item with SKU, stock and minimum stock
 - **Sale** / **SaleItem** — customer order with one or more lines
 - **StockMovement** — purchase, adjustment, writeoff or sale stock delta
@@ -37,11 +38,15 @@ StockFlow is a portfolio-ready inventory and sales management demo designed to p
 4. Creating a sale decreases stock and writes movement rows.
 5. Manual stock changes are done through movements to preserve auditability.
 6. Key actions write audit log entries visible in the UI.
+7. Admins can manage staff metadata; employees can update their own personal profile data.
 
 ## Frontend behavior
 - Responsive layout for desktop, tablet and mobile
 - Collapsible desktop sidebar
 - Mobile burger menu with overlay navigation
+- Compact dashboard with smaller metric cards and denser information layout
+- Sales and movements shown as structured list rows with modal detail cards
+- Product catalog rendered as adaptive cards using CSS grid
 - Friendly error handling for timeout, auth and backend availability issues
 - Transient welcome/success messages
 
@@ -57,6 +62,10 @@ StockFlow is a portfolio-ready inventory and sales management demo designed to p
 ## API endpoints
 - `POST /api/auth/login`
 - `GET /api/me`
+- `PUT /api/profile`
+- `GET /api/users`
+- `POST /api/users`
+- `PUT /api/users/{user_id}`
 - `GET /api/dashboard`
 - `GET /api/products`
 - `POST /api/products`
@@ -84,3 +93,4 @@ Backend smoke tests cover:
 - duplicate-product validation inside one sale
 - idempotent demo-population endpoint
 - audit log endpoint availability
+- profile update and admin staff management endpoints

@@ -28,6 +28,25 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    profile: Mapped["EmployeeProfile | None"] = relationship(back_populates="user", uselist=False)
+
+
+class EmployeeProfile(Base):
+    __tablename__ = "employee_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    department: Mapped[str] = mapped_column(String(80), nullable=False, default="Operations")
+    title: Mapped[str] = mapped_column(String(120), nullable=False, default="Team Member")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
+    hierarchy_level: Mapped[str] = mapped_column(String(40), nullable=False, default="staff")
+    manager_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="profile")
+
 
 class Product(Base):
     __tablename__ = "products"
@@ -159,6 +178,25 @@ def parse_details(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def serialize_user_profile(user: User, profile: EmployeeProfile | None = None) -> dict[str, Any]:
+    current = profile or user.profile
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "created_at": to_iso(user.created_at),
+        "phone": current.phone if current else None,
+        "department": current.department if current else "Operations",
+        "title": current.title if current else ("Administrator" if user.role == "admin" else "Team Member"),
+        "status": current.status if current else "active",
+        "hierarchy_level": current.hierarchy_level if current else ("management" if user.role == "admin" else "staff"),
+        "manager_name": current.manager_name if current else None,
+        "bio": current.bio if current else None,
+        "updated_at": to_iso(current.updated_at) if current else to_iso(user.created_at),
+    }
+
+
 def create_audit_log(
     db: Session,
     *,
@@ -201,6 +239,10 @@ def init_db() -> None:
     with get_session_factory()() as db:
         seed_db(db)
         ensure_portfolio_demo_data(db)
+        ensure_org_demo_users(db)
+        db.flush()
+        ensure_user_profiles(db)
+        db.commit()
 
 
 def seed_db(db: Session) -> None:
@@ -284,6 +326,123 @@ def seed_db(db: Session) -> None:
     )
 
     db.commit()
+
+
+def ensure_org_demo_users(db: Session) -> bool:
+    demo_people = [
+        {
+            "name": "Sofia Martinez",
+            "email": "sofia.martinez@stockflow.app",
+            "password": "Sofia123!",
+            "role": "employee",
+            "created_at": datetime(2026, 4, 12, 8, 0, 0, tzinfo=timezone.utc),
+            "profile": {
+                "phone": "+54 11 5555 0199",
+                "department": "Warehouse",
+                "title": "Warehouse Specialist",
+                "status": "active",
+                "hierarchy_level": "staff",
+                "manager_name": "Admin",
+                "bio": "Coordinates receiving, storage checks and replenishment readiness.",
+            },
+        },
+        {
+            "name": "Diego Alvarez",
+            "email": "diego.alvarez@stockflow.app",
+            "password": "Diego123!",
+            "role": "employee",
+            "created_at": datetime(2026, 4, 13, 8, 0, 0, tzinfo=timezone.utc),
+            "profile": {
+                "phone": "+54 11 5555 0144",
+                "department": "Sales",
+                "title": "Sales Associate",
+                "status": "active",
+                "hierarchy_level": "staff",
+                "manager_name": "Admin",
+                "bio": "Handles daily walk-in orders and customer-facing product recommendations.",
+            },
+        },
+        {
+            "name": "Laura Gomez",
+            "email": "laura.gomez@stockflow.app",
+            "password": "Laura123!",
+            "role": "admin",
+            "created_at": datetime(2026, 4, 14, 8, 0, 0, tzinfo=timezone.utc),
+            "profile": {
+                "phone": "+54 11 5555 0170",
+                "department": "Operations",
+                "title": "Operations Lead",
+                "status": "active",
+                "hierarchy_level": "management",
+                "manager_name": "Board",
+                "bio": "Oversees floor operations, reporting and SLA follow-through.",
+            },
+        },
+    ]
+
+    changed = False
+    for item in demo_people:
+        user = db.scalar(select(User).where(User.email == item["email"]))
+        if user:
+            continue
+        user = User(
+            name=item["name"],
+            email=item["email"],
+            password_hash=hash_password(item["password"]),
+            role=item["role"],
+            created_at=item["created_at"],
+        )
+        db.add(user)
+        db.flush()
+        profile = EmployeeProfile(
+            user_id=user.id,
+            phone=item["profile"]["phone"],
+            department=item["profile"]["department"],
+            title=item["profile"]["title"],
+            status=item["profile"]["status"],
+            hierarchy_level=item["profile"]["hierarchy_level"],
+            manager_name=item["profile"]["manager_name"],
+            bio=item["profile"]["bio"],
+            updated_at=item["created_at"],
+        )
+        db.add(profile)
+        create_audit_log(
+            db,
+            action="seed.user_created",
+            message=f"Seeded staff member {user.name}",
+            entity_type="user",
+            entity_id=user.id,
+            created_by=1,
+            created_at=item["created_at"],
+            details={"email": user.email, "role": user.role},
+        )
+        changed = True
+
+    return changed
+
+
+def ensure_user_profiles(db: Session) -> bool:
+    changed = False
+    users = db.scalars(select(User)).all()
+    for user in users:
+        profile = db.scalar(select(EmployeeProfile).where(EmployeeProfile.user_id == user.id))
+        if profile:
+            continue
+        db.add(
+            EmployeeProfile(
+                user_id=user.id,
+                phone=None,
+                department="Operations" if user.role == "admin" else "Sales",
+                title="Administrator" if user.role == "admin" else "Staff Member",
+                status="active",
+                hierarchy_level="management" if user.role == "admin" else "staff",
+                manager_name="Board" if user.role == "admin" else "Admin",
+                bio="Autogenerated profile to support portfolio-ready people management.",
+                updated_at=user.created_at,
+            )
+        )
+        changed = True
+    return changed
 
 
 def ensure_portfolio_demo_data(db: Session) -> bool:
@@ -451,6 +610,7 @@ def create_sale_record(
 
 __all__ = [
     "AuditLog",
+    "EmployeeProfile",
     "Product",
     "Sale",
     "SaleItem",
@@ -458,12 +618,15 @@ __all__ = [
     "StockMovement",
     "User",
     "create_audit_log",
+    "ensure_org_demo_users",
     "ensure_portfolio_demo_data",
+    "ensure_user_profiles",
     "get_db",
     "get_engine",
     "get_session_factory",
     "init_db",
     "now_utc",
     "parse_details",
+    "serialize_user_profile",
     "to_iso",
 ]

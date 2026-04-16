@@ -1,19 +1,20 @@
+export type UserRole = 'admin' | 'employee'
+export type UserStatus = 'active' | 'on_leave' | 'inactive'
+export type HierarchyLevel = 'staff' | 'lead' | 'management'
+
 export type User = {
   id: number
   name: string
   email: string
-  role: 'admin' | 'employee'
+  role: UserRole
   created_at: string
-}
-
-export type Product = {
-  id: number
-  name: string
-  sku: string
-  price: number
-  stock: number
-  min_stock: number
-  created_at: string
+  phone: string | null
+  department: string
+  title: string
+  status: UserStatus
+  hierarchy_level: HierarchyLevel
+  manager_name: string | null
+  bio: string | null
   updated_at: string
 }
 
@@ -55,6 +56,17 @@ export type Dashboard = {
   top_products: TopProduct[]
   revenue_by_day: RevenuePoint[]
   viewer: User
+}
+
+export type Product = {
+  id: number
+  name: string
+  sku: string
+  price: number
+  stock: number
+  min_stock: number
+  created_at: string
+  updated_at: string
 }
 
 export type Movement = {
